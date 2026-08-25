@@ -49,6 +49,7 @@ import {
   Share2,
   Sparkles,
   Tag,
+  Trash2,
 } from 'lucide-react'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -281,6 +282,67 @@ function PostModal({
   )
 }
 
+// ─── DeleteConfirmModal ─────────────────────────────────────────────────────
+
+function DeleteConfirmModal({
+  open,
+  topic,
+  onCancel,
+  onConfirm,
+  deleting,
+  error,
+}: {
+  open: boolean
+  topic: string
+  onCancel: () => void
+  onConfirm: () => void
+  deleting: boolean
+  error: string | null
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !deleting) onCancel() }}>
+      <DialogContent className="sm:max-w-sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">
+              <Trash2 className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Delete this content?</h2>
+              <p className="mt-1 line-clamp-2 text-sm text-gray-500">{topic}</p>
+              <p className="mt-1.5 text-xs text-gray-400">This can&apos;t be undone.</p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+              <p className="text-xs text-red-700">{error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={onCancel} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+              onClick={onConfirm}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Deleting…</>
+              ) : (
+                <><Trash2 className="mr-2 h-4 w-4" />Delete</>
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Shared small components ──────────────────────────────────────────────────
 
 function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
@@ -433,11 +495,42 @@ function Badges({ isLatest, isNew }: { isLatest: boolean; isNew: boolean }) {
 
 // ─── VideoCard ────────────────────────────────────────────────────────────────
 
-function VideoCard({ item, isLatest, isNew }: { item: VideoLibraryItem; isLatest: boolean; isNew: boolean }) {
+function VideoCard({
+  item,
+  isLatest,
+  isNew,
+  onDeleted,
+}: {
+  item: VideoLibraryItem
+  isLatest: boolean
+  isNew: boolean
+  onDeleted: (id: string) => void
+}) {
   const [viewOpen, setViewOpen] = useState(false)
   const [postOpen, setPostOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const duration = item.output_data?.duration_sec
   const filename = `${item.topic.slice(0, 40).replace(/\s+/g, '-').toLowerCase()}.mp4`
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`/api/content/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        throw new Error((b as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+      setDeleteOpen(false)
+      onDeleted(item.id)
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -481,7 +574,7 @@ function VideoCard({ item, isLatest, isNew }: { item: VideoLibraryItem; isLatest
           </div>
 
           {/* Actions */}
-          <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
             <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewOpen(true)}>
               <Play className="mr-1 h-3 w-3" />Watch
             </Button>
@@ -497,6 +590,14 @@ function VideoCard({ item, isLatest, isNew }: { item: VideoLibraryItem; isLatest
                 <Download className="mr-1 h-3 w-3" />Save
               </Button>
             </a>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />Delete
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -533,16 +634,59 @@ function VideoCard({ item, isLatest, isNew }: { item: VideoLibraryItem; isLatest
         open={postOpen}
         onClose={() => setPostOpen(false)}
       />
+
+      {/* Delete confirm modal */}
+      <DeleteConfirmModal
+        open={deleteOpen}
+        topic={item.topic}
+        onCancel={() => { setDeleteOpen(false); setDeleteError(null) }}
+        onConfirm={handleDelete}
+        deleting={deleting}
+        error={deleteError}
+      />
     </>
   )
 }
 
 // ─── ImageCard ────────────────────────────────────────────────────────────────
 
-function ImageCard({ item, isLatest, isNew, isHighlighted }: { item: ImageLibraryItem; isLatest: boolean; isNew: boolean; isHighlighted?: boolean }) {
+function ImageCard({
+  item,
+  isLatest,
+  isNew,
+  isHighlighted,
+  onDeleted,
+}: {
+  item: ImageLibraryItem
+  isLatest: boolean
+  isNew: boolean
+  isHighlighted?: boolean
+  onDeleted: (id: string) => void
+}) {
   const [viewOpen, setViewOpen] = useState(false)
   const [postOpen, setPostOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const filename = `${item.topic.slice(0, 40).replace(/\s+/g, '-').toLowerCase()}.jpg`
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`/api/content/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        throw new Error((b as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+      setDeleteOpen(false)
+      onDeleted(item.id)
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <>
@@ -589,7 +733,7 @@ function ImageCard({ item, isLatest, isNew, isHighlighted }: { item: ImageLibrar
           </div>
 
           {/* Actions */}
-          <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
             <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewOpen(true)}>
               <ImageIcon className="mr-1 h-3 w-3" />View
             </Button>
@@ -605,6 +749,14 @@ function ImageCard({ item, isLatest, isNew, isHighlighted }: { item: ImageLibrar
                 <Download className="mr-1 h-3 w-3" />Save
               </Button>
             </a>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />Delete
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -657,6 +809,16 @@ function ImageCard({ item, isLatest, isNew, isHighlighted }: { item: ImageLibrar
         }}
         open={postOpen}
         onClose={() => setPostOpen(false)}
+      />
+
+      {/* Delete confirm modal */}
+      <DeleteConfirmModal
+        open={deleteOpen}
+        topic={item.topic}
+        onCancel={() => { setDeleteOpen(false); setDeleteError(null) }}
+        onConfirm={handleDelete}
+        deleting={deleting}
+        error={deleteError}
       />
     </>
   )
@@ -743,9 +905,22 @@ function reconstructBlogHtml(d: Record<string, unknown>): string {
 
 // ─── BlogCard ─────────────────────────────────────────────────────────────────
 
-function BlogCard({ item, isLatest, isNew }: { item: BlogLibraryItem; isLatest: boolean; isNew: boolean }) {
+function BlogCard({
+  item,
+  isLatest,
+  isNew,
+  onDeleted,
+}: {
+  item: BlogLibraryItem
+  isLatest: boolean
+  isNew: boolean
+  onDeleted: (id: string) => void
+}) {
   const [readOpen, setReadOpen] = useState(false)
   const [postOpen, setPostOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [heroLoaded, setHeroLoaded] = useState(false)
   const [heroError, setHeroError] = useState(false)
 
@@ -773,6 +948,24 @@ function BlogCard({ item, isLatest, isNew }: { item: BlogLibraryItem; isLatest: 
   const validHero   = typeof heroUrl   === 'string' && heroUrl.startsWith('http')   ? heroUrl   : null
   const validInline = typeof inlineUrl === 'string' && inlineUrl.startsWith('http') ? inlineUrl : null
   const canRead     = true // always allow read — we can always show something
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`/api/content/${item.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        throw new Error((b as { error?: string }).error ?? `HTTP ${res.status}`)
+      }
+      setDeleteOpen(false)
+      onDeleted(item.id)
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Failed to delete')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   // When modal opens and html_final missing in generated_content → fetch from content_drafts once
   useEffect(() => {
@@ -869,7 +1062,7 @@ function BlogCard({ item, isLatest, isNew }: { item: BlogLibraryItem; isLatest: 
           </div>
 
           {/* Actions */}
-          <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
             {canRead ? (
               <Button size="sm" variant="outline" className="text-xs" onClick={() => setReadOpen(true)}>
                 <BookOpen className="mr-1 h-3 w-3" />Read
@@ -885,6 +1078,14 @@ function BlogCard({ item, isLatest, isNew }: { item: BlogLibraryItem; isLatest: 
                 </Button>
               </a>
             ) : <div />}
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />Delete
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -970,6 +1171,16 @@ function BlogCard({ item, isLatest, isNew }: { item: BlogLibraryItem; isLatest: 
         open={postOpen}
         onClose={() => setPostOpen(false)}
       />
+
+      {/* Delete confirm modal */}
+      <DeleteConfirmModal
+        open={deleteOpen}
+        topic={title}
+        onCancel={() => { setDeleteOpen(false); setDeleteError(null) }}
+        onConfirm={handleDelete}
+        deleting={deleting}
+        error={deleteError}
+      />
     </>
   )
 }
@@ -1020,6 +1231,10 @@ function VideoSection() {
     return list
   }, [items, search, category, lang, sort])
 
+  const handleDeleted = useCallback((id: string) => {
+    setItems((prev) => prev.filter((v) => v.id !== id))
+  }, [])
+
   if (loading) return <LoadingSkeleton type="video" />
   if (error) return <ErrorBanner message={error} onRetry={load} />
 
@@ -1035,7 +1250,13 @@ function VideoSection() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((item, i) => (
-            <VideoCard key={item.id} item={item} isLatest={i === 0 && sort === 'desc'} isNew={newIds.has(item.id)} />
+            <VideoCard
+              key={item.id}
+              item={item}
+              isLatest={i === 0 && sort === 'desc'}
+              isNew={newIds.has(item.id)}
+              onDeleted={handleDeleted}
+            />
           ))}
         </div>
       )}
@@ -1097,6 +1318,10 @@ function ImageSection({ highlightJobId }: { highlightJobId?: string }) {
     return list
   }, [items, search, category, lang, sort])
 
+  const handleDeleted = useCallback((id: string) => {
+    setItems((prev) => prev.filter((v) => v.id !== id))
+  }, [])
+
   if (loading) return <LoadingSkeleton type="image" />
   if (error) return <ErrorBanner message={error} onRetry={load} />
 
@@ -1115,7 +1340,13 @@ function ImageSection({ highlightJobId }: { highlightJobId?: string }) {
             const isHighlighted = !!highlightJobId && item.job_id === highlightJobId
             return (
               <div key={item.id} ref={isHighlighted ? highlightRef : undefined}>
-                <ImageCard item={item} isLatest={i === 0 && sort === 'desc'} isNew={newIds.has(item.id)} isHighlighted={isHighlighted} />
+                <ImageCard
+                  item={item}
+                  isLatest={i === 0 && sort === 'desc'}
+                  isNew={newIds.has(item.id)}
+                  isHighlighted={isHighlighted}
+                  onDeleted={handleDeleted}
+                />
               </div>
             )
           })}
@@ -1170,6 +1401,10 @@ function BlogSection() {
     return list
   }, [items, search, category, lang, sort])
 
+  const handleDeleted = useCallback((id: string) => {
+    setItems((prev) => prev.filter((v) => v.id !== id))
+  }, [])
+
   if (loading) return <LoadingSkeleton type="blog" />
   if (error) return <ErrorBanner message={error} onRetry={load} />
 
@@ -1185,7 +1420,13 @@ function BlogSection() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((item, i) => (
-            <BlogCard key={item.id} item={item} isLatest={i === 0 && sort === 'desc'} isNew={newIds.has(item.id)} />
+            <BlogCard
+              key={item.id}
+              item={item}
+              isLatest={i === 0 && sort === 'desc'}
+              isNew={newIds.has(item.id)}
+              onDeleted={handleDeleted}
+            />
           ))}
         </div>
       )}
