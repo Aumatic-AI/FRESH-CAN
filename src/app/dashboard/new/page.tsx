@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
@@ -40,9 +41,17 @@ interface FormData {
   content_types:   ContentType[]
   province:        string
   city:            string
+  scene_notes:     string
 }
 
-type Phase = 'idle' | 'creating' | 'triggering'
+type Phase = 'idle' | 'creating' | 'awaiting_questions' | 'triggering'
+
+interface QuestionItem {
+  id: number
+  question: string
+  options: string[]
+  placeholder?: string
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -141,8 +150,13 @@ function buildPayload(
   jobId: string,
   form: FormData,
   type: ContentType,
+  answers?: { question: string; answer: string }[],
 ): Record<string, unknown> {
-  const location_targeting = buildLocationTargeting(form.province, form.city)
+  // NOTE: this field is named location_config (not location_targeting) —
+  // that's the exact field name the n8n workflow's sanitizer reads. Sending
+  // it under any other name means manual city/province selection gets
+  // silently ignored and the workflow always falls back to auto-rotation.
+  const location_config = buildLocationTargeting(form.province, form.city)
   const base = {
     job_id:              jobId,
     topic:               form.topic,
@@ -152,7 +166,9 @@ function buildPayload(
     language:            form.language,
     brand:               'Fresh-CAN',
     content_type:        type,
-    location_targeting,
+    location_config,
+    scene_notes:         form.scene_notes,
+    ...(answers ? { answers } : {}),
   }
   if (type === 'video') {
     return { ...base, script_type: form.script_type, video_duration: form.video_duration }
@@ -177,7 +193,7 @@ export default function NewContentPage() {
 
   const {
     topic, keywords, category, target_audience, script_type, video_duration,
-    language, content_types, province, city, status, pendingJobId,
+    language, content_types, province, city, scene_notes, status, pendingJobId,
     restoreSession, setField, toggleType, startGeneration, clearOnCancel,
   } = useNewContentStore()
 
@@ -187,6 +203,42 @@ export default function NewContentPage() {
 
   const isSubmitting = phase !== 'idle'
   const videoOn = content_types.includes('video')
+
+  // Holds the created job + returned questions while the user answers them.
+  // Only ever populated when 'image_post' is one of the selected content types.
+  const [pendingImageJob, setPendingImageJob] = useState<{
+    jobId: string
+    formSnapshot: FormData
+    questions: QuestionItem[]
+  } | null>(null)
+  const [answers, setAnswers] = useState<Record<number, string>>({})
+
+  async function triggerNonImageTypes(jobId: string, formSnapshot: FormData) {
+    const otherTypes = formSnapshot.content_types.filter((t) => t !== 'image_post')
+    if (otherTypes.length === 0) return { failed: [] as string[] }
+
+    const results = await Promise.allSettled(
+      otherTypes.map(async (type) => {
+        const res = await fetch('/api/n8n/trigger', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            payload: buildPayload(jobId, formSnapshot, type),
+          }),
+        })
+        if (!res.ok) {
+          const b = await res.json().catch(() => ({}))
+          throw new Error(`[${type}] ${b.error ?? `HTTP ${res.status}`}`)
+        }
+        return type
+      }),
+    )
+    const failed = results
+      .filter((r) => r.status === 'rejected')
+      .map((r) => (r as PromiseRejectedResult).reason.message as string)
+    return { failed }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -218,47 +270,121 @@ export default function NewContentPage() {
       return
     }
 
-    setPhase('triggering')
     const formSnapshot: FormData = {
       topic, keywords, category, target_audience,
       script_type, video_duration, language, content_types,
-      province, city,
+      province, city, scene_notes,
     }
-    const results = await Promise.allSettled(
-      content_types.map(async (type) => {
-        const res = await fetch('/api/n8n/trigger', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            payload: buildPayload(job.id, formSnapshot, type),
-          }),
-        })
-        if (!res.ok) {
-          const b = await res.json().catch(() => ({}))
-          throw new Error(`[${type}] ${b.error ?? `HTTP ${res.status}`}`)
-        }
-        return type
-      }),
-    )
 
-    supabase
-      .from('content_jobs')
-      .update({ webhook_sent_at: new Date().toISOString() })
-      .eq('id', job.id)
-      .then(() => {})
+    // ── If image_post wasn't selected, nothing changes — same flow as before ──
+    if (!content_types.includes('image_post')) {
+      setPhase('triggering')
+      const { failed } = await triggerNonImageTypes(job.id, formSnapshot)
+      supabase.from('content_jobs')
+        .update({ webhook_sent_at: new Date().toISOString() })
+        .eq('id', job.id).then(() => {})
 
-    const failed = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[]
+      if (failed.length > 0) {
+        setError(`n8n webhook error: ${failed.join(' · ')}`)
+        setPhase('idle')
+        return
+      }
+      startGeneration(job.id)
+      router.push(`/dashboard/jobs/${job.id}`)
+      return
+    }
+
+    // ── image_post is selected — fetch clarifying questions first ──────────
+    setPhase('triggering')
+    // Fire video/blog immediately if also selected — they don't need a brief
+    const { failed } = await triggerNonImageTypes(job.id, formSnapshot)
     if (failed.length > 0) {
-      const msgs = failed.map((r) => (r.reason as Error).message).join(' · ')
-      setError(`n8n webhook error: ${msgs}`)
+      setError(`n8n webhook error: ${failed.join(' · ')}`)
       setPhase('idle')
       return
     }
 
-    // Persist session — cleared only after all content types are approved
-    startGeneration(job.id)
-    router.push(`/dashboard/jobs/${job.id}`)
+    const qRes = await fetch('/api/n8n/trigger', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'image_questions',
+        payload: buildPayload(job.id, formSnapshot, 'image_post'),
+      }),
+    })
+
+    if (!qRes.ok) {
+      const b = await qRes.json().catch(() => ({}))
+      setError(b.error ?? 'Failed to get clarifying questions from n8n')
+      setPhase('idle')
+      return
+    }
+
+    const qData = await qRes.json()
+    const questions: QuestionItem[] = qData.questions ?? []
+
+    if (questions.length === 0) {
+      // Fallback: no questions came back — just generate straight away
+      const res = await fetch('/api/n8n/trigger', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'image_post',
+          payload: buildPayload(job.id, formSnapshot, 'image_post'),
+        }),
+      })
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        setError(b.error ?? 'Failed to trigger image generation')
+        setPhase('idle')
+        return
+      }
+      startGeneration(job.id)
+      router.push(`/dashboard/jobs/${job.id}`)
+      return
+    }
+
+    setPendingImageJob({ jobId: job.id, formSnapshot, questions })
+    setAnswers({})
+    setPhase('awaiting_questions')
+  }
+
+  const handleAnswersSubmit = async () => {
+    if (!pendingImageJob) return
+    setPhase('triggering')
+
+    const answersArray = pendingImageJob.questions.map((q) => ({
+      question: q.question,
+      answer:   answers[q.id] || '',
+    }))
+
+    const res = await fetch('/api/n8n/trigger', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'image_post',
+        payload: buildPayload(
+          pendingImageJob.jobId,
+          pendingImageJob.formSnapshot,
+          'image_post',
+          answersArray,
+        ),
+      }),
+    })
+
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}))
+      setError(b.error ?? 'Failed to trigger image generation')
+      setPhase('awaiting_questions')
+      return
+    }
+
+    supabase.from('content_jobs')
+      .update({ webhook_sent_at: new Date().toISOString() })
+      .eq('id', pendingImageJob.jobId).then(() => {})
+
+    startGeneration(pendingImageJob.jobId)
+    router.push(`/dashboard/jobs/${pendingImageJob.jobId}`)
   }
 
   const handleCancel = () => {
@@ -272,6 +398,74 @@ export default function NewContentPage() {
 
   return (
     <div className="mx-auto max-w-[600px] py-6">
+
+      {/* ── Clarifying questions step — shown only after image_post job creation ── */}
+      {phase === 'awaiting_questions' && pendingImageJob && (
+        <div className="mb-6 space-y-5">
+          <div className="mb-2">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+              A few quick questions
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Answer these to help the AI create a more specific image for &ldquo;{pendingImageJob.formSnapshot.topic}&rdquo;
+            </p>
+          </div>
+
+          {pendingImageJob.questions.map((q) => (
+            <Card key={q.id} className="border bg-white shadow-sm">
+              <CardContent className="space-y-3 pt-5">
+                <p className="text-sm font-medium text-gray-800">{q.question}</p>
+                <div className="flex flex-wrap gap-2">
+                  {q.options.map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        answers[q.id] === opt
+                          ? 'border-gray-900 bg-gray-900 text-white'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  value={answers[q.id] && !q.options.includes(answers[q.id]) ? answers[q.id] : ''}
+                  onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                  placeholder={q.placeholder || 'Or type your own answer…'}
+                  className="text-sm"
+                />
+              </CardContent>
+            </Card>
+          ))}
+
+          {error && (
+            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4">
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+
+          <Button
+            onClick={handleAnswersSubmit}
+            disabled={phase === 'triggering'}
+            size="lg"
+            className="w-full bg-gray-900 py-6 text-base font-semibold hover:bg-gray-800"
+          >
+            {phase === 'triggering' ? (
+              <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Generating…</>
+            ) : (
+              <><Sparkles className="mr-2 h-5 w-5" />Continue &amp; Generate Image</>
+            )}
+          </Button>
+        </div>
+      )}
+
+      {/* ── Normal form — hidden while the questions step above is showing ── */}
+      {phase !== 'awaiting_questions' && (
+      <>
 
       {/* ── Pending-job banner (shown when returning mid-generation) ── */}
       {status === 'pending' && pendingJobId && (
@@ -439,6 +633,26 @@ export default function NewContentPage() {
               </Select>
             </div>
 
+            {/* ── Custom scene / story idea (optional) ──────────────── */}
+            <div className="space-y-1.5">
+              <FL htmlFor="scene_notes">
+                Your Scene Idea{' '}
+                <span className="text-xs font-normal text-gray-400">(optional)</span>
+              </FL>
+              <Textarea
+                id="scene_notes"
+                value={scene_notes}
+                onChange={(e) => setField('scene_notes', e.target.value)}
+                placeholder="e.g. Show a senior who can't reach the food bank during a heatwave, then Fresh-CAN arrives with cold groceries..."
+                disabled={isSubmitting}
+                rows={4}
+              />
+              <p className="text-xs text-gray-400">
+                Leave blank to use the default story. If filled, this drives the opening
+                problem/story — the truck, QR-scan, and shelving shots stay the same.
+              </p>
+            </div>
+
           </CardContent>
         </Card>
 
@@ -578,6 +792,9 @@ export default function NewContentPage() {
         </div>
 
       </form>
+
+      </>
+      )}
     </div>
   )
 }

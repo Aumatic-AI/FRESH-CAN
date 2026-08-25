@@ -9,6 +9,7 @@ function getSupabase() {
 
 type WebhookType =
   | 'image_post'
+  | 'image_questions'
   | 'video'
   | 'blog'
   | 'social'
@@ -17,13 +18,14 @@ type WebhookType =
   | 'blog_approve'
 
 const WEBHOOK_URLS: Record<WebhookType, string | undefined> = {
-  image_post:    process.env.N8N_IMAGE_WEBHOOK,
-  video:         process.env.N8N_VIDEO_WEBHOOK,
-  blog:          process.env.N8N_BLOG_WEBHOOK,
-  social:        process.env.N8N_SOCIAL_WEBHOOK,
-  video_approve: process.env.N8N_VIDEO_APPROVE_WEBHOOK,
-  image_approve: process.env.N8N_IMAGE_APPROVE_WEBHOOK,
-  blog_approve:  process.env.N8N_BLOG_APPROVE_WEBHOOK,
+  image_post:      process.env.N8N_IMAGE_WEBHOOK,
+  image_questions: process.env.N8N_IMAGE_QUESTIONS_WEBHOOK,
+  video:           process.env.N8N_VIDEO_WEBHOOK,
+  blog:            process.env.N8N_BLOG_WEBHOOK,
+  social:          process.env.N8N_SOCIAL_WEBHOOK,
+  video_approve:   process.env.N8N_VIDEO_APPROVE_WEBHOOK,
+  image_approve:   process.env.N8N_IMAGE_APPROVE_WEBHOOK,
+  blog_approve:    process.env.N8N_BLOG_APPROVE_WEBHOOK,
 }
 
 export async function POST(req: NextRequest) {
@@ -55,10 +57,14 @@ export async function POST(req: NextRequest) {
   }
   const bodyStr = JSON.stringify(payload)
 
-  const GENERATION_TYPES: WebhookType[] = ['video', 'blog', 'image_post', 'social']
+  const GENERATION_TYPES: WebhookType[] = ['video', 'blog', 'image_post', 'social', 'video_approve', 'image_approve', 'blog_approve']
 
   try {
     // No timeout for generation types — wait until n8n responds however long it takes.
+    // image_questions also gets no artificial timeout override beyond the default,
+    // since it's a quick text-only call, but it is NOT in GENERATION_TYPES because
+    // (unlike image_post/video/blog) the frontend needs to read its response body
+    // right away instead of treating it as fire-and-forget.
     const n8nRes = await fetch(url, {
       method: 'POST',
       headers: reqHeaders,
@@ -95,6 +101,21 @@ export async function POST(req: NextRequest) {
         console.log(`[n8n-trigger] blog returned ${n8nRes.status}: ${text}`)
       }
       return NextResponse.json({ success: true })
+    }
+
+    // image_questions: unlike the other types, this one is NOT fire-and-forget
+    // — n8n responds immediately with the actual question list, which the
+    // frontend needs right away to render the Q&A step.
+    if (type === 'image_questions') {
+      if (!n8nRes.ok) {
+        const text = await n8nRes.text().catch(() => '')
+        return NextResponse.json({ error: `n8n returned ${n8nRes.status}: ${text}` }, { status: 502 })
+      }
+      const data = await n8nRes.json().catch(() => null)
+      if (!data) {
+        return NextResponse.json({ error: 'Invalid response from n8n' }, { status: 502 })
+      }
+      return NextResponse.json(data)
     }
 
     // For other generation webhooks (video, image_post), result comes via

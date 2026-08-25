@@ -17,6 +17,7 @@ interface FormFields {
   content_types:   ContentType[]
   province:        string   // 'auto' or one of the 10 provinces
   city:            string   // free-text, empty = omit
+  scene_notes:     string   // optional custom scene/story idea from user
 }
 
 interface GenState {
@@ -45,6 +46,7 @@ const FORM_DEFAULTS: FormFields = {
   content_types:   ['video', 'image_post', 'blog'],
   province:        'auto',
   city:            '',
+  scene_notes:     '',
 }
 
 const GEN_DEFAULTS: GenState = {
@@ -59,6 +61,7 @@ function pickPersisted(s: NewContentStore): FormFields & GenState {
     target_audience: s.target_audience, script_type: s.script_type,
     video_duration: s.video_duration, language: s.language,
     content_types: s.content_types, province: s.province, city: s.city,
+    scene_notes: s.scene_notes,
     status: s.status, pendingJobId: s.pendingJobId, generatedAt: s.generatedAt,
   }
 }
