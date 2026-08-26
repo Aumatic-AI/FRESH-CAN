@@ -450,7 +450,7 @@ export default function NewContentPage() {
 
           <Button
             onClick={handleAnswersSubmit}
-            disabled={phase === 'triggering'}
+            disabled={(phase as string) === 'triggering'}
             size="lg"
             className="w-full bg-gray-900 py-6 text-base font-semibold hover:bg-gray-800"
           >
