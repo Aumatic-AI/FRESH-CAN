@@ -454,7 +454,7 @@ export default function NewContentPage() {
             size="lg"
             className="w-full bg-gray-900 py-6 text-base font-semibold hover:bg-gray-800"
           >
-            {phase === 'triggering' ? (
+            {(phase as string) === 'triggering' ? (
               <><Loader2 className="mr-2 h-5 w-5 animate-spin" />Generating…</>
             ) : (
               <><Sparkles className="mr-2 h-5 w-5" />Continue &amp; Generate Image</>
