@@ -511,7 +511,8 @@ function VideoCard({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const duration = item.output_data?.duration_sec
+  const rawDuration = item.output_data?.duration_sec
+const duration = rawDuration ? Math.round(rawDuration * 10) / 10 : rawDuration
   const filename = `${item.topic.slice(0, 40).replace(/\s+/g, '-').toLowerCase()}.mp4`
 
   const handleDelete = async () => {
