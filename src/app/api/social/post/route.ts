@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
           hashtags: hashtags ?? [],
           file_url: file_url ?? null,
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(90000),
       })
     } catch (fetchErr) {
       return NextResponse.json(

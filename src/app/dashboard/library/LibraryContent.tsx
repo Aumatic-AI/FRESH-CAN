@@ -1218,11 +1218,7 @@ function PostedSection() {
             <span className="rounded-full bg-purple-100 px-2 py-0.5 text-purple-700 font-medium">Posted</span>
             <span>{item.content_type}</span>
           </div>
-          {item.social_platform_logs?.map((log: { platform: string; post_url: string }, i: number) => (
-            <a key={i} href={log.post_url} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-600 hover:underline">
-              View on {log.platform} →
-            </a>
-          ))}
+
         </Card>
       ))}
     </div>

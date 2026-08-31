@@ -458,10 +458,7 @@ export async function getJobWithAll(
 export async function getPostedContent() {
   const { data, error } = await supabase
     .from('social_posts')
-    .select(`
-      id, job_id, content_type, caption, hashtags, status, created_at,
-      social_platform_logs ( platform, platform_post_id, post_url, posted_at )
-    `)
+    .select('id, job_id, content_type, caption, hashtags, status, created_at')
     .eq('status', 'posted')
     .order('created_at', { ascending: false })
 
