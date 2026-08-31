@@ -21,6 +21,7 @@ import {
   getVideoLibrary,
   getImageLibrary,
   getBlogLibrary,
+  getPostedContent,
 } from '@/services/contentService'
 import type {
   VideoLibraryItem,
@@ -1187,7 +1188,46 @@ function BlogCard({
 }
 
 // ─── VideoSection ─────────────────────────────────────────────────────────────
+// ─── PostedSection ────────────────────────────────────────────────────────────
 
+function PostedSection() {
+  const [items, setItems] = useState<Awaited<ReturnType<typeof getPostedContent>>>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getPostedContent().then(setItems).finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <LoadingSkeleton type="video" />
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 py-20 text-center">
+        <Share2 className="mb-3 h-8 w-8 text-gray-300" />
+        <h3 className="text-base font-semibold text-gray-700">Nothing posted yet</h3>
+        <p className="mt-1.5 text-sm text-gray-400">Post something from the other tabs to see it here.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-4">
+      {items.map((item) => (
+        <Card key={item.id} className="p-4 space-y-2">
+          <p className="text-sm font-semibold line-clamp-2">{item.caption}</p>
+          <div className="flex flex-wrap gap-1.5 text-xs text-gray-500">
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-purple-700 font-medium">Posted</span>
+            <span>{item.content_type}</span>
+          </div>
+          {item.social_platform_logs?.map((log: { platform: string; post_url: string }, i: number) => (
+            <a key={i} href={log.post_url} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-600 hover:underline">
+              View on {log.platform} →
+            </a>
+          ))}
+        </Card>
+      ))}
+    </div>
+  )
+}
 function VideoSection() {
   const router = useRouter()
   const [items, setItems]       = useState<VideoLibraryItem[]>([])
@@ -1608,14 +1648,18 @@ export default function LibraryContent() {
           <TabsTrigger value="images">
             <ImageIcon className="mr-1.5 h-4 w-4" />Images
           </TabsTrigger>
-          <TabsTrigger value="blogs">
+                   <TabsTrigger value="blogs">
             <BookOpen className="mr-1.5 h-4 w-4" />Blog Posts
+          </TabsTrigger>
+          <TabsTrigger value="posted">
+            <Share2 className="mr-1.5 h-4 w-4" />Posted
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="videos"><VideoSection /></TabsContent>
         <TabsContent value="images"><ImageSection highlightJobId={highlight} /></TabsContent>
-        <TabsContent value="blogs"><BlogSection /></TabsContent>
+                <TabsContent value="blogs"><BlogSection /></TabsContent>
+        <TabsContent value="posted"><PostedSection /></TabsContent>
       </Tabs>
     </div>
   )
