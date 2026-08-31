@@ -1190,7 +1190,7 @@ function BlogCard({
 // ─── VideoSection ─────────────────────────────────────────────────────────────
 // ─── PostedSection ────────────────────────────────────────────────────────────
 
-function PostedSection() {
+export function PostedSection() {
   const [items, setItems] = useState<Awaited<ReturnType<typeof getPostedContent>>>([])
   const [loading, setLoading] = useState(true)
 
@@ -1654,11 +1654,7 @@ export default function LibraryContent() {
                <TabsContent value="blogs"><BlogSection /></TabsContent>
       </Tabs>
 
-      <div className="pt-6 border-t">
-        <h2 className="mb-1 text-lg font-semibold text-gray-900">Posted</h2>
-        <p className="mb-2 text-sm text-gray-500">Content that has been published to social media.</p>
-        <PostedSection />
-      </div>
+      
     </div>
   )
 }

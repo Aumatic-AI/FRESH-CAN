@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   PlusCircle,
   Library,
+  Share2,
   LogOut,
   X,
 } from 'lucide-react'
@@ -33,6 +34,12 @@ const navItems = [
     href: '/dashboard/library',
     label: 'Library',
     icon: Library,
+    exact: false,
+  },
+  {
+    href: '/dashboard/posted',
+    label: 'Posted',
+    icon: Share2,
     exact: false,
   },
 ]
