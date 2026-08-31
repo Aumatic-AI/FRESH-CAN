@@ -1651,16 +1651,18 @@ export default function LibraryContent() {
                    <TabsTrigger value="blogs">
             <BookOpen className="mr-1.5 h-4 w-4" />Blog Posts
           </TabsTrigger>
-          <TabsTrigger value="posted">
-            <Share2 className="mr-1.5 h-4 w-4" />Posted
-          </TabsTrigger>
-        </TabsList>
+                  </TabsList>
 
         <TabsContent value="videos"><VideoSection /></TabsContent>
         <TabsContent value="images"><ImageSection highlightJobId={highlight} /></TabsContent>
-                <TabsContent value="blogs"><BlogSection /></TabsContent>
-        <TabsContent value="posted"><PostedSection /></TabsContent>
+               <TabsContent value="blogs"><BlogSection /></TabsContent>
       </Tabs>
+
+      <div className="pt-6 border-t">
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">Posted</h2>
+        <p className="mb-2 text-sm text-gray-500">Content that has been published to social media.</p>
+        <PostedSection />
+      </div>
     </div>
   )
 }

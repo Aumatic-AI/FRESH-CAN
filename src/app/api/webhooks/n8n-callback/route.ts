@@ -168,16 +168,18 @@ export async function POST(req: NextRequest) {
       const socialPosts = await getSocialPostsForJob(job_id)
       const matchingPost = socialPosts.find((p) => p.content_type === content_type)
 
-      if (matchingPost) {
-        await upsertPlatformLog(
-          matchingPost.id,
-          postData.platform as Parameters<typeof upsertPlatformLog>[1],
-          'posted',
-          typeof postData.platform_post_id === 'string' ? postData.platform_post_id : undefined,
-          typeof postData.post_url === 'string' ? postData.post_url : undefined,
-        )
-        await updateSocialPostStatus(matchingPost.id, 'posted')
-      }
+        if (matchingPost) {
+    await supabase.from('social_platform_logs').insert({
+      social_post_id: matchingPost.id,
+      job_id: job_id,
+      platform: postData.platform,
+      status: 'posted',
+      platform_post_id: typeof postData.platform_post_id === 'string' ? postData.platform_post_id : null,
+      post_url: typeof postData.post_url === 'string' ? postData.post_url : null,
+      posted_at: new Date().toISOString(),
+    })
+    await updateSocialPostStatus(matchingPost.id, 'posted')
+  }
 
     } else {
       return NextResponse.json({ error: 'Unknown event type' }, { status: 400 })
