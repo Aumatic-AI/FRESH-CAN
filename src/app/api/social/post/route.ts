@@ -30,9 +30,14 @@ export async function POST(req: NextRequest) {
     await upsertSocialPost(job_id, content_type, caption, hashtags ?? [], platforms)
 
     const webhookUrl = process.env.N8N_SOCIAL_WEBHOOK
-    if (webhookUrl) {
-      const secret = process.env.N8N_WEBHOOK_SECRET ?? ''
-      fetch(webhookUrl, {
+    if (!webhookUrl) {
+      return NextResponse.json({ error: 'Social posting is not configured yet.' }, { status: 503 })
+    }
+
+    const secret = process.env.N8N_WEBHOOK_SECRET ?? ''
+    let n8nResponse: Response
+    try {
+      n8nResponse = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -46,8 +51,21 @@ export async function POST(req: NextRequest) {
           hashtags: hashtags ?? [],
           file_url: file_url ?? null,
         }),
-        signal: AbortSignal.timeout(5000),
-      }).catch(() => {})
+        signal: AbortSignal.timeout(15000),
+      })
+    } catch (fetchErr) {
+      return NextResponse.json(
+        { error: 'Could not reach the posting workflow. Nothing was posted.' },
+        { status: 502 },
+      )
+    }
+
+    if (!n8nResponse.ok) {
+      const errText = await n8nResponse.text().catch(() => '')
+      return NextResponse.json(
+        { error: `Posting workflow responded with an error (${n8nResponse.status}): ${errText}` },
+        { status: 502 },
+      )
     }
 
     return NextResponse.json({ success: true })
