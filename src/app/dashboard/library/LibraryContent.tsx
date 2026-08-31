@@ -52,6 +52,14 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react'
+async function getPostedJobIds(contentType: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('social_posts')
+    .select('job_id')
+    .eq('status', 'posted')
+    .eq('content_type', contentType)
+  return new Set((data ?? []).map((p: { job_id: string }) => p.job_id))
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1213,12 +1221,25 @@ export function PostedSection() {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-4">
       {items.map((item) => (
         <Card key={item.id} className="p-4 space-y-2">
+          {item.media_url && (
+            <div className="aspect-video overflow-hidden rounded-lg bg-black">
+              {item.content_type === 'video' ? (
+                <video src={item.media_url} className="h-full w-full object-cover" controls />
+              ) : (
+                <img src={item.media_url} alt={item.caption} className="h-full w-full object-cover" />
+              )}
+            </div>
+          )}
           <p className="text-sm font-semibold line-clamp-2">{item.caption}</p>
           <div className="flex flex-wrap gap-1.5 text-xs text-gray-500">
             <span className="rounded-full bg-purple-100 px-2 py-0.5 text-purple-700 font-medium">Posted</span>
             <span>{item.content_type}</span>
           </div>
-
+          {item.platform_logs?.map((log: { platform: string; post_url: string }, i: number) => (
+            <a key={i} href={log.post_url} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-600 hover:underline">
+              View on {log.platform} →
+            </a>
+          ))}
         </Card>
       ))}
     </div>
@@ -1235,9 +1256,13 @@ function VideoSection() {
   const [lang, setLang]         = useState('all')
   const [sort, setSort]         = useState<'desc' | 'asc'>('desc')
 
-  const load = useCallback(async () => {
+    const load = useCallback(async () => {
     setError(null)
-    try { setItems(await getVideoLibrary()) }
+    try {
+      const all = await getVideoLibrary()
+      const postedIds = await getPostedJobIds('video')
+      setItems(all.filter((v) => !postedIds.has(v.job_id)))
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to load') }
     finally { setLoading(false) }
   }, [])
@@ -1315,9 +1340,13 @@ function ImageSection({ highlightJobId }: { highlightJobId?: string }) {
   const [sort, setSort]         = useState<'desc' | 'asc'>('desc')
   const highlightRef            = useRef<HTMLDivElement>(null)
 
-  const load = useCallback(async () => {
+    const load = useCallback(async () => {
     setError(null)
-    try { setItems(await getImageLibrary()) }
+    try {
+      const all = await getImageLibrary()
+      const postedIds = await getPostedJobIds('image_post')
+      setItems(all.filter((v) => !postedIds.has(v.job_id)))
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to load') }
     finally { setLoading(false) }
   }, [])
@@ -1408,7 +1437,11 @@ function BlogSection() {
 
   const load = useCallback(async () => {
     setError(null)
-    try { setItems(await getBlogLibrary()) }
+    try {
+      const all = await getBlogLibrary()
+      const postedIds = await getPostedJobIds('blog')
+      setItems(all.filter((v) => !postedIds.has(v.job_id)))
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Failed to load') }
     finally { setLoading(false) }
   }, [])

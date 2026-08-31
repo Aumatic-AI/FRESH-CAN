@@ -456,12 +456,31 @@ export async function getJobWithAll(
   return { ...job, drafts, generated_content: generated, social_posts: social }
 }
 export async function getPostedContent() {
-  const { data, error } = await supabase
+  const { data: posts, error } = await supabase
     .from('social_posts')
     .select('id, job_id, content_type, caption, hashtags, status, created_at')
     .eq('status', 'posted')
     .order('created_at', { ascending: false })
 
   if (error) throw error
-  return data
+  if (!posts || posts.length === 0) return []
+
+  const jobIds = posts.map(p => p.job_id)
+    const { data: content } = await supabase
+    .from('generated_content')
+    .select('job_id, file_url, image_url, thumbnail_url')
+    .in('job_id', jobIds)
+
+  const { data: logs } = await supabase
+    .from('social_platform_logs')
+    .select('job_id, platform, post_url')
+    .in('job_id', jobIds)
+
+  return posts.map(post => ({
+    ...post,
+        media_url: content?.find(c => c.job_id === post.job_id)?.image_url
+      ?? content?.find(c => c.job_id === post.job_id)?.file_url
+      ?? null,
+    platform_logs: logs?.filter(l => l.job_id === post.job_id) ?? [],
+  }))
 }
