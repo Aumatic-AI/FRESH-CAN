@@ -3,7 +3,6 @@ import { createClient } from '@supabase/supabase-js'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  // Use service role key if available, otherwise anon key (RLS is disabled on all tables)
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -16,7 +15,7 @@ export async function PATCH(
 ) {
   const { jobId } = await params
 
-  let body: { draft_data: Record<string, unknown>; content_type?: string }
+  let body: { draft_data: Record<string, unknown>; content_type?: string; language?: string }
   try {
     body = await req.json()
   } catch {
@@ -28,6 +27,7 @@ export async function PATCH(
   }
 
   const contentType = body.content_type ?? 'video'
+  const language = body.language ?? 'EN'
   const supabase = getSupabase()
 
   const { data, error } = await supabase
@@ -39,6 +39,7 @@ export async function PATCH(
     })
     .eq('job_id', jobId)
     .eq('content_type', contentType)
+    .eq('language', language)
     .select()
     .single()
 

@@ -60,7 +60,48 @@ export async function POST(req: NextRequest) {
           completed_at:  vc.completed_at,
         },
       )
-      await updateJobStatus(vc.job_id, 'ready')
+
+      // Only mark the whole job "ready" once every language that was
+      // requested has actually finished. For a BOTH job, that means both
+      // an EN and an FR row must exist in generated_content before we
+      // let the dashboard treat this job as fully done and redirect away
+      // from the editable job page.
+      const { data: jobRow, error: jobRowError } = await supabase
+        .from('content_jobs')
+        .select('language')
+        .eq('id', vc.job_id)
+        .single()
+
+      if (jobRowError) {
+        console.error('[n8n-callback] failed to fetch job language for', vc.job_id, jobRowError.message)
+      }
+
+      const jobLanguage = jobRow?.language as string | undefined
+
+      if (jobLanguage === 'BOTH') {
+        const { data: videoRows, error: videoRowsError } = await supabase
+          .from('generated_content')
+          .select('language')
+          .eq('job_id', vc.job_id)
+          .eq('content_type', 'video')
+
+        if (videoRowsError) {
+          console.error('[n8n-callback] failed to fetch video rows for', vc.job_id, videoRowsError.message)
+        }
+
+        const languagesDone = new Set((videoRows ?? []).map((r) => r.language))
+        const bothDone = languagesDone.has('EN') && languagesDone.has('FR')
+
+        if (bothDone) {
+          await updateJobStatus(vc.job_id, 'ready')
+        }
+        // else: leave the job status as-is (still 'generating') so the job
+        // page keeps showing the normal editor with the language toggle,
+        // letting the user see and approve the other language.
+      } else {
+        await updateJobStatus(vc.job_id, 'ready')
+      }
+
       return NextResponse.json({ success: true })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'

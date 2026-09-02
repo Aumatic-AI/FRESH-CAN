@@ -86,10 +86,11 @@ export async function POST(req: NextRequest) {
           if (Array.isArray(blogData)) blogData = (blogData[0] as Record<string, unknown>) ?? {}
 
           const db = getSupabase()
-          await db.from('content_drafts').upsert(
-            { job_id: jobId, content_type: 'blog', draft_data: blogData, status: 'draft_ready', is_approved: false, updated_at: new Date().toISOString() },
-            { onConflict: 'job_id,content_type' },
-          )
+const draftLanguage = ((payload as Record<string, unknown>).language as string) || 'EN'
+await db.from('content_drafts').upsert(
+  { job_id: jobId, content_type: 'blog', language: draftLanguage, draft_data: blogData, status: 'draft_ready', is_approved: false, updated_at: new Date().toISOString() },
+  { onConflict: 'job_id,content_type,language' },
+)
           await db.from('content_jobs')
             .update({ status: 'draft_ready', updated_at: new Date().toISOString() })
             .eq('id', jobId)

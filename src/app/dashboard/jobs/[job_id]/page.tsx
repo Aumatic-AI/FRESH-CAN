@@ -268,12 +268,17 @@ interface ContentDraft {
   id: string
   job_id: string
   content_type: ContentType
+  language: string
   draft_data: Record<string, unknown>
   is_edited: boolean
   is_approved: boolean
   status: string
   created_at: string
   updated_at: string
+}
+
+function draftKey(type: ContentType, language: string): string {
+  return `${type}::${language}`
 }
 
 interface ImagePostResult {
@@ -1107,6 +1112,49 @@ function Chip({ label, value }: { label: string; value: string }) {
   )
 }
 
+// ─── LanguageToggle ───────────────────────────────────────────────────────────
+
+const LANG_ORDER: Record<string, number> = { EN: 0, FR: 1 }
+const LANG_LABELS: Record<string, string> = { EN: 'English', FR: 'Français' }
+
+function LanguageToggle({
+  languages,
+  selected,
+  onSelect,
+  disabled,
+}: {
+  languages: string[]
+  selected: string
+  onSelect: (lang: string) => void
+  disabled?: boolean
+}) {
+  if (languages.length <= 1) return null
+  const sorted = [...languages].sort((a, b) => (LANG_ORDER[a] ?? 99) - (LANG_ORDER[b] ?? 99))
+
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="text-xs text-gray-400">Language</span>
+      <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+        {sorted.map((lang) => (
+          <button
+            key={lang}
+            type="button"
+            disabled={disabled}
+            onClick={() => onSelect(lang)}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              selected === lang
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            {LANG_LABELS[lang] ?? lang}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function JobDetailPage() {
@@ -1121,8 +1169,50 @@ export default function JobDetailPage() {
   const [pageError, setPageError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<ContentType>('video')
 
-  // Drafts — keyed by content type
-  const [allDrafts, setAllDrafts]     = useState<Map<ContentType, ContentDraft>>(new Map())
+  // Drafts — keyed by `${content_type}::${language}` so EN and FR can coexist
+  const [allDrafts, setAllDrafts] = useState<Map<string, ContentDraft>>(new Map())
+  const [selectedLanguage, setSelectedLanguage] = useState<Map<ContentType, string>>(new Map())
+
+  const getEffectiveLanguage = useCallback((type: ContentType): string => {
+    const chosen = selectedLanguage.get(type)
+    if (chosen) return chosen
+    const jobLang = job?.language ?? 'EN'
+    return jobLang === 'BOTH' ? 'EN' : jobLang
+  }, [selectedLanguage, job?.language])
+
+  const getDraft = useCallback((type: ContentType): ContentDraft | undefined => {
+    return allDrafts.get(draftKey(type, getEffectiveLanguage(type)))
+  }, [allDrafts, getEffectiveLanguage])
+
+  const getAvailableLanguages = useCallback((type: ContentType): string[] => {
+    const langs: string[] = []
+    for (const key of allDrafts.keys()) {
+      const [t, l] = key.split('::')
+      if (t === type) langs.push(l)
+    }
+    return langs
+  }, [allDrafts])
+
+  // Switching language doesn't call n8n or Supabase — it only changes which
+  // already-loaded draft is displayed, and refreshes the editable state
+  // (scriptParts / blogEdit) to match that draft.
+  const handleLanguageSwitch = useCallback((type: ContentType, lang: string) => {
+    setSelectedLanguage((prev) => {
+      const next = new Map(prev)
+      next.set(type, lang)
+      return next
+    })
+    const draft = allDrafts.get(draftKey(type, lang))
+    if (!draft) return
+    if (type === 'video') {
+      const vData = draft.draft_data as unknown as VideoDraftData
+      setScriptParts(vData.script_parts ?? [])
+    }
+    if (type === 'blog') {
+      setBlogEdit(blogEditFromDraft(draft.draft_data))
+    }
+  }, [allDrafts])
+
   const [scriptParts, setScriptParts] = useState<ScriptPart[]>([])
 
   // Regenerate
@@ -1153,14 +1243,14 @@ export default function JobDetailPage() {
     if (job && (job.status === 'pending' || job.status === 'draft_ready')) {
       const types: ContentType[] = job.content_types ?? []
       // image_post is polled separately via generated_content — exclude here
-      return types.filter((t) => t !== 'image_post').some((t) => !allDrafts.has(t))
+      return types.filter((t) => t !== 'image_post').some((t) => !getDraft(t))
     }
     // Also poll when video is generating/approved — realtime can miss the completion event
     if (job && (job.status === 'generating' || job.status === 'approved')) {
       return true
     }
     return false
-  }, [regenLoading, job, allDrafts])
+  }, [regenLoading, job, allDrafts, getDraft])
 
   // ── Reload drafts from DB ────────────────────────────────────────────────────
   // Called by realtime handler AND by the polling interval.
@@ -1185,32 +1275,41 @@ export default function JobDetailPage() {
 
     if (!draftRows) return
 
-    const draftMap = new Map<ContentType, ContentDraft>()
-    const approved = new Set<ContentType>()
+    const draftMap = new Map<string, ContentDraft>()
+    const approvedCounts = new Map<ContentType, { total: number; approved: number }>()
     for (const row of draftRows as ContentDraft[]) {
-      draftMap.set(row.content_type, row)
-      if (row.is_approved) approved.add(row.content_type)
+      const lang = row.language || 'EN'
+      draftMap.set(draftKey(row.content_type, lang), row)
+      const c = approvedCounts.get(row.content_type) ?? { total: 0, approved: 0 }
+      c.total += 1
+      if (row.is_approved) c.approved += 1
+      approvedCounts.set(row.content_type, c)
     }
     setAllDrafts(draftMap)
+    const approved = new Set<ContentType>()
+    for (const [type, c] of approvedCounts) {
+      if (c.total > 0 && c.approved === c.total) approved.add(type)
+    }
     setApprovedTypes(approved)
 
-    const vd = draftMap.get('video')
+    const defaultLang = job?.language === 'BOTH' ? 'EN' : (job?.language ?? 'EN')
+    const vd = draftMap.get(draftKey('video', selectedLanguage.get('video') ?? defaultLang))
     if (vd) {
       const vData = vd.draft_data as unknown as VideoDraftData
       if (vData?.script_parts?.length) setScriptParts(vData.script_parts)
     }
 
-    const bd = draftMap.get('blog')
+    const bd = draftMap.get(draftKey('blog', selectedLanguage.get('blog') ?? defaultLang))
     if (bd) setBlogEdit((prev) => prev ?? blogEditFromDraft(bd.draft_data))
 
     // Clear regenLoading if the specific type being regenerated now has content
     setRegenLoading((prev) => {
       if (prev === null) return null
-      const d = draftMap.get(prev)
+      const d = draftMap.get(draftKey(prev, selectedLanguage.get(prev) ?? defaultLang))
       const isReady = d && (d.status === 'draft_ready' || d.status === 'approved' || (d.status === 'pending' && freshJob?.status === 'draft_ready'))
       return isReady ? null : prev
     })
-  }, [job_id])
+  }, [job_id, job?.language, selectedLanguage])
 
   // ── Initial load ──────────────────────────────────────────────────────────────
 
@@ -1235,38 +1334,54 @@ export default function JobDetailPage() {
     if (j.content_types?.length) setActiveTab(j.content_types[0])
 
     if (!draftErr && draftRows) {
-      const draftMap  = new Map<ContentType, ContentDraft>()
-      const approved  = new Set<ContentType>()
+      const draftMap = new Map<string, ContentDraft>()
+      const approvedCounts = new Map<ContentType, { total: number; approved: number }>()
 
       for (const row of draftRows as ContentDraft[]) {
-        draftMap.set(row.content_type, row)
-        if (row.is_approved) approved.add(row.content_type)
+        const lang = row.language || 'EN'
+        draftMap.set(draftKey(row.content_type, lang), row)
+        const c = approvedCounts.get(row.content_type) ?? { total: 0, approved: 0 }
+        c.total += 1
+        if (row.is_approved) c.approved += 1
+        approvedCounts.set(row.content_type, c)
       }
 
       setAllDrafts(draftMap)
+      const approved = new Set<ContentType>()
+      for (const [type, c] of approvedCounts) {
+        if (c.total > 0 && c.approved === c.total) approved.add(type)
+      }
       setApprovedTypes(approved)
 
-      const vd = draftMap.get('video')
+      const defaultLang = j.language === 'BOTH' ? 'EN' : j.language
+      const vd = draftMap.get(draftKey('video', defaultLang))
       if (vd) {
         const vData = vd.draft_data as unknown as VideoDraftData
         setScriptParts(vData.script_parts ?? [])
       }
 
-      const bd = draftMap.get('blog')
+      const bd = draftMap.get(draftKey('blog', defaultLang))
       if (bd) setBlogEdit(blogEditFromDraft(bd.draft_data))
     }
 
     if (imgRow) setImageResult(imgRow as ImagePostResult)
 
-    // Check if job is stuck at 'generating' but video is already done
+    // Check if job is stuck at 'generating' but video is already done.
+    // For a BOTH job, only treat it as stuck-but-done once BOTH an EN and FR
+    // row exist — a single language finishing does not mean the whole video
+    // step is complete, and must not redirect the user away early.
     if (j.status === 'generating' && (j.content_types as ContentType[]).includes('video')) {
-      const { data: videoContent } = await supabase
+      const { data: videoRows } = await supabase
         .from('generated_content')
-        .select('id, file_url')
+        .select('id, file_url, language')
         .eq('job_id', job_id)
         .eq('content_type', 'video')
         .not('file_url', 'is', null)
-        .maybeSingle()
+
+      const langsDone = new Set((videoRows ?? []).map((r) => r.language))
+      const videoContent = j.language === 'BOTH'
+        ? (langsDone.has('EN') && langsDone.has('FR') ? videoRows?.[0] : null)
+        : (videoRows && videoRows.length > 0 ? videoRows[0] : null)
 
       if (videoContent) {
         // Video is ready but status wasn't updated — fix it and navigate
@@ -1329,14 +1444,21 @@ export default function JobDetailPage() {
           return
         }
 
-        // Also check generated_content for video completion
-        const { data: videoContent } = await supabase
+        // Also check generated_content for video completion. For a BOTH job,
+        // only treat video as complete once both EN and FR rows exist —
+        // otherwise we'd redirect away the moment the first language
+        // finishes, hiding the toggle before the second one can be approved.
+        const { data: videoRowsPoll } = await supabase
           .from('generated_content')
-          .select('id, file_url')
+          .select('id, file_url, language')
           .eq('job_id', job_id)
           .eq('content_type', 'video')
           .not('file_url', 'is', null)
-          .maybeSingle()
+
+        const langsDonePoll = new Set((videoRowsPoll ?? []).map((r) => r.language))
+        const videoContent = job?.language === 'BOTH'
+          ? (langsDonePoll.has('EN') && langsDonePoll.has('FR') ? videoRowsPoll?.[0] : null)
+          : (videoRowsPoll && videoRowsPoll.length > 0 ? videoRowsPoll[0] : null)
 
         if (videoContent) {
           setJob((prev) => prev ? { ...prev, status: 'ready' } : prev)
@@ -1356,7 +1478,7 @@ export default function JobDetailPage() {
     if (!job) return
     const hasBlog = (job.content_types as ContentType[]).includes('blog')
     const key = `blog-wait-${job_id}`
-    if (hasBlog && !allDrafts.has('blog')) {
+    if (hasBlog && !getDraft('blog')) {
       const stored = sessionStorage.getItem(key)
       if (stored) {
         setBlogWaitStart(parseInt(stored, 10))
@@ -1365,26 +1487,28 @@ export default function JobDetailPage() {
         sessionStorage.setItem(key, String(now))
         setBlogWaitStart(now)
       }
-    } else if (allDrafts.has('blog')) {
+    } else if (getDraft('blog')) {
       sessionStorage.removeItem(key)
       setBlogWaitStart(null)
     }
-  }, [job, allDrafts, job_id])
+  }, [job, allDrafts, job_id, getDraft])
 
   // ── Realtime: all drafts for this job ─────────────────────────────────────────
 
   useEffect(() => {
     const updateDraft = (row: ContentDraft) => {
+      const lang = row.language || 'EN'
       setAllDrafts((prev) => {
         const next = new Map(prev)
-        next.set(row.content_type, row)
+        next.set(draftKey(row.content_type, lang), row)
         return next
       })
-      if (row.content_type === 'video' && row.status === 'draft_ready') {
+      const currentLang = getEffectiveLanguage(row.content_type)
+      if (row.content_type === 'video' && row.status === 'draft_ready' && lang === currentLang) {
         const vData = row.draft_data as unknown as VideoDraftData
         if (vData.script_parts) setScriptParts(vData.script_parts)
       }
-      if (row.content_type === 'blog') {
+      if (row.content_type === 'blog' && lang === currentLang) {
         setBlogEdit(blogEditFromDraft(row.draft_data))
       }
       // Clear regen loading for this type when new draft arrives
@@ -1410,7 +1534,7 @@ export default function JobDetailPage() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [job_id])
+  }, [job_id, getEffectiveLanguage])
 
   // ── Image post polling — polls generated_content every 10s ────────────────────
   // n8n responds immediately to fc-image-post and saves the result to
@@ -1509,8 +1633,9 @@ export default function JobDetailPage() {
     // Optimistically mark draft as pending in local state
     setAllDrafts((prev) => {
       const next = new Map(prev)
-      const existing = next.get(type)
-      if (existing) next.set(type, { ...existing, status: 'pending', is_approved: false })
+      const key = draftKey(type, getEffectiveLanguage(type))
+      const existing = next.get(key)
+      if (existing) next.set(key, { ...existing, status: 'pending', is_approved: false })
       return next
     })
     setApprovedTypes((prev) => { const s = new Set(prev); s.delete(type); return s })
@@ -1522,73 +1647,84 @@ export default function JobDetailPage() {
   }
 
   // ── Video approve handler ────────────────────────────────────────────────────
+  // For a BOTH job, one click approves and triggers generation for BOTH
+  // languages in sequence, not just whichever language the toggle currently
+  // shows. Each language is saved and triggered independently.
 
   const handleVideoApprove = async () => {
     if (!job) return
-    const videoDraft = allDrafts.get('video')
-    if (!videoDraft) return
+    const isBoth = job.language === 'BOTH'
+    const languagesToApprove = isBoth ? ['EN', 'FR'] : [getEffectiveLanguage('video')]
 
     setApproving('video')
     setApproveErrors((prev) => { const m = new Map(prev); m.delete('video'); return m })
 
-    const vData = videoDraft.draft_data as unknown as VideoDraftData
-    const updatedData: VideoDraftData = {
-      ...vData,
-      script_parts: scriptParts,
-      full_script:  scriptParts.map((p) => p.text).join(' '),
-    }
+    for (const lang of languagesToApprove) {
+      const videoDraft = allDrafts.get(draftKey('video', lang))
+      if (!videoDraft) continue
 
-    // Persist edits
-    const saveRes = await fetch(`/api/jobs/${job_id}/draft`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ draft_data: updatedData }),
-    })
-    if (!saveRes.ok) {
-      const b = await saveRes.json().catch(() => ({}))
-      setApproveErrors((prev) => { const m = new Map(prev); m.set('video', b.error ?? 'Failed to save draft'); return m })
-      setApproving(null)
-      return
-    }
+      const vData = videoDraft.draft_data as unknown as VideoDraftData
+      // Use live-edited scriptParts only for whichever language is currently
+      // displayed on screen; the other language uses its own stored draft
+      // untouched, since the user never had a chance to edit it in this UI.
+      const partsForThisLang = (lang === getEffectiveLanguage('video'))
+        ? scriptParts
+        : (vData.script_parts ?? [])
 
-    // Fire video_approve webhook
-    const triggerRes = await fetch('/api/n8n/trigger', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'video_approve',
-        payload: {
-          job_id,
-          approved_script_parts: scriptParts,
-          full_script:           updatedData.full_script,
-          script_config:         vData.script_config,
-          topic:                 job.topic,
-          category:              job.category,
-          language:              job.language,
-          script_type:           vData.script_type || 'SOLUTION',
-          video_duration:        String(vData.script_config?.total_duration ?? ''),
-          brand:                 null,
-          persona:               null,
-          category_direction:    null,
-        },
-      }),
-    })
-    if (!triggerRes.ok) {
-      const b = await triggerRes.json().catch(() => ({}))
-      setApproveErrors((prev) => { const m = new Map(prev); m.set('video', b.error ?? 'Failed to trigger video generation'); return m })
-      setApproving(null)
-      return
-    }
+      const updatedData: VideoDraftData = {
+        ...vData,
+        script_parts: partsForThisLang,
+        full_script:  partsForThisLang.map((p) => p.text).join(' '),
+      }
 
-    // Mark approved + set job to generating
-    await Promise.all([
-      supabase.from('content_drafts')
+      const saveRes = await fetch(`/api/jobs/${job_id}/draft`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ draft_data: updatedData, content_type: 'video', language: lang }),
+      })
+      if (!saveRes.ok) {
+        const b = await saveRes.json().catch(() => ({}))
+        setApproveErrors((prev) => { const m = new Map(prev); m.set('video', `[${lang}] ${b.error ?? 'Failed to save draft'}`); return m })
+        setApproving(null)
+        return
+      }
+
+      const triggerRes = await fetch('/api/n8n/trigger', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'video_approve',
+          payload: {
+            job_id,
+            approved_script_parts: partsForThisLang,
+            full_script:           updatedData.full_script,
+            script_config:         vData.script_config,
+            topic:                 job.topic,
+            category:              job.category,
+            language:              lang,
+            script_type:           vData.script_type || 'SOLUTION',
+            video_duration:        String(vData.script_config?.total_duration ?? ''),
+            brand:                 null,
+            persona:               null,
+            category_direction:    null,
+          },
+        }),
+      })
+      if (!triggerRes.ok) {
+        const b = await triggerRes.json().catch(() => ({}))
+        setApproveErrors((prev) => { const m = new Map(prev); m.set('video', `[${lang}] ${b.error ?? 'Failed to trigger video generation'}`); return m })
+        setApproving(null)
+        return
+      }
+
+      await supabase.from('content_drafts')
         .update({ is_approved: true })
-        .eq('job_id', job_id).eq('content_type', 'video'),
-      supabase.from('content_jobs')
-        .update({ status: 'generating' })
-        .eq('id', job_id),
-    ])
+        .eq('job_id', job_id).eq('content_type', 'video').eq('language', lang)
+    }
+
+    await supabase.from('content_jobs')
+      .update({ status: 'generating' })
+      .eq('id', job_id)
 
     const newApprovedVideo = new Set([...approvedTypes, 'video' as ContentType])
     setApprovedTypes(newApprovedVideo)
@@ -1596,7 +1732,6 @@ export default function JobDetailPage() {
     setApproving(null)
     addJob({ jobId: job_id, topic: job.topic, type: 'video', status: 'generating', progress: 0 })
     clearAfterApproval(job_id)
-    // Multi-type: redirect to tracker when all content types are approved
     const allTypesVideo = (job.content_types as ContentType[])
     if (allTypesVideo.length > 1 && allTypesVideo.every((t) => newApprovedVideo.has(t))) {
       router.push(`/dashboard/library?track=${job_id}`)
@@ -1633,8 +1768,9 @@ export default function JobDetailPage() {
       return
     }
 
-    const draft = allDrafts.get(type)
+    const draft = getDraft(type)
     if (!draft) { setApproving(null); return }
+    const draftLang = getEffectiveLanguage(type)
 
     // For blog: save edited content to DB first
     let finalDraftData = draft.draft_data
@@ -1643,7 +1779,7 @@ export default function JobDetailPage() {
       const saveRes = await fetch(`/api/jobs/${job_id}/draft`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ draft_data: finalDraftData, content_type: 'blog' }),
+        body:    JSON.stringify({ draft_data: finalDraftData, content_type: 'blog', language: draftLang }),
       })
       if (!saveRes.ok) {
         const b = await saveRes.json().catch(() => ({}))
@@ -1665,7 +1801,7 @@ export default function JobDetailPage() {
             job_id,
             topic:          job.topic,
             category:       job.category,
-            language:       job.language,
+            language:       draftLang,
             keywords:       job.keywords ?? '',
             content_type:   type,
             approved_draft: finalDraftData,
@@ -1687,7 +1823,7 @@ export default function JobDetailPage() {
     // Mark approved in DB + local state
     await supabase.from('content_drafts')
       .update({ is_approved: true, status: 'approved', updated_at: new Date().toISOString() })
-      .eq('job_id', job_id).eq('content_type', type)
+      .eq('job_id', job_id).eq('content_type', type).eq('language', draftLang)
 
     // For blog: save approved content to generated_content so it appears in Library
     if (type === 'blog') {
@@ -1701,6 +1837,7 @@ export default function JobDetailPage() {
         {
           job_id,
           content_type: 'blog',
+          language: draftLang,
           file_url: be.images.hero.url || null,
           output_data: {
             // New n8n format — Library reads these
@@ -1728,7 +1865,7 @@ export default function JobDetailPage() {
           },
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'job_id,content_type' },
+        { onConflict: 'job_id,content_type,language' },
       )
     }
 
@@ -1736,12 +1873,13 @@ export default function JobDetailPage() {
     setApprovedTypes(newApprovedFinal)
     setAllDrafts((prev) => {
       const next = new Map(prev)
-      const existing = next.get(type)
-      if (existing) next.set(type, { ...existing, is_approved: true, status: 'approved' })
+      const key = draftKey(type, draftLang)
+      const existing = next.get(key)
+      if (existing) next.set(key, { ...existing, is_approved: true, status: 'approved' })
       return next
     })
     if (type === 'blog') {
-      const blogTopic = (blogEdit ?? blogEditFromDraft(allDrafts.get('blog')?.draft_data ?? {})).post_title || job.topic
+      const blogTopic = (blogEdit ?? blogEditFromDraft(getDraft('blog')?.draft_data ?? {})).post_title || job.topic
       addJob({ jobId: job_id, topic: blogTopic, type: 'blog', status: 'completed', progress: 100 })
     }
     setApproving(null)
@@ -1762,7 +1900,7 @@ export default function JobDetailPage() {
   // ── Render helpers ─────────────────────────────────────────────────────────────
 
   const renderTabContent = (type: ContentType) => {
-    const draft = allDrafts.get(type)
+    const draft = getDraft(type)
     const isRegenPending = regenLoading === type
 
     // ── image_post: uses generated_content, not content_drafts ──────────────
@@ -1927,7 +2065,7 @@ export default function JobDetailPage() {
   const isGenerating = job.status === 'generating' || job.status === 'approved'
 
   // Derive action bar state for the currently active tab
-  const activeDraft    = allDrafts.get(activeTab)
+  const activeDraft    = getDraft(activeTab)
   const tabApproved    = approvedTypes.has(activeTab)
   const videoGenerating = activeTab === 'video' && isGenerating
   const activeTabReady  = activeTab === 'image_post' ? !!imageResult : (!!activeDraft && (activeDraft.status !== 'pending' || job?.status === 'draft_ready'))
@@ -1991,7 +2129,7 @@ export default function JobDetailPage() {
             style={{ gridTemplateColumns: `repeat(${contentTypes.length}, 1fr)` }}
           >
             {contentTypes.map((type) => {
-              const d = allDrafts.get(type)
+              const d = getDraft(type)
               const imgReady = type === 'image_post' && !!imageResult
               const isPending = type === 'image_post' ? imagePolling : (regenLoading === type || (d?.status === 'pending' && job?.status === 'pending'))
               const isDraftReady = type === 'image_post' ? imgReady : (d?.status === 'draft_ready' || (d?.status === 'pending' && job?.status === 'draft_ready'))
@@ -2013,12 +2151,26 @@ export default function JobDetailPage() {
 
           {contentTypes.map((type) => (
             <TabsContent key={type} value={type} className="mt-4">
+              <LanguageToggle
+                languages={getAvailableLanguages(type)}
+                selected={getEffectiveLanguage(type)}
+                onSelect={(lang) => handleLanguageSwitch(type, lang)}
+                disabled={approving === type || regenLoading === type}
+              />
               {renderTabContent(type)}
             </TabsContent>
           ))}
         </Tabs>
       ) : (
-        renderTabContent(contentTypes[0])
+        <>
+          <LanguageToggle
+            languages={getAvailableLanguages(contentTypes[0])}
+            selected={getEffectiveLanguage(contentTypes[0])}
+            onSelect={(lang) => handleLanguageSwitch(contentTypes[0], lang)}
+            disabled={approving === contentTypes[0] || regenLoading === contentTypes[0]}
+          />
+          {renderTabContent(contentTypes[0])}
+        </>
       )}
 
       {/* ── Sticky action bar ────────────────────────────────────────────── */}
