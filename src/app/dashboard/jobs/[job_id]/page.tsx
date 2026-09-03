@@ -1652,35 +1652,32 @@ export default function JobDetailPage() {
   // shows. Each language is saved and triggered independently.
 
   const handleVideoApprove = async () => {
-    if (!job) return
-    const isBoth = job.language === 'BOTH'
-    const languagesToApprove = isBoth ? ['EN', 'FR'] : [getEffectiveLanguage('video')]
+  if (!job) return
+  const isBoth = job.language === 'BOTH'
 
-    setApproving('video')
-    setApproveErrors((prev) => { const m = new Map(prev); m.delete('video'); return m })
+  setApproving('video')
+  setApproveErrors((prev) => { const m = new Map(prev); m.delete('video'); return m })
 
-    for (const lang of languagesToApprove) {
-      const videoDraft = allDrafts.get(draftKey('video', lang))
-      if (!videoDraft) continue
+  if (isBoth) {
+    const enDraft = allDrafts.get(draftKey('video', 'EN'))
+    const frDraft = allDrafts.get(draftKey('video', 'FR'))
+    if (!enDraft || !frDraft) { setApproving(null); return }
 
-      const vData = videoDraft.draft_data as unknown as VideoDraftData
-      // Use live-edited scriptParts only for whichever language is currently
-      // displayed on screen; the other language uses its own stored draft
-      // untouched, since the user never had a chance to edit it in this UI.
-      const partsForThisLang = (lang === getEffectiveLanguage('video'))
-        ? scriptParts
-        : (vData.script_parts ?? [])
+    const enData = enDraft.draft_data as unknown as VideoDraftData
+    const frData = frDraft.draft_data as unknown as VideoDraftData
+    const enParts = (getEffectiveLanguage('video') === 'EN') ? scriptParts : (enData.script_parts ?? [])
+    const frParts = (getEffectiveLanguage('video') === 'FR') ? scriptParts : (frData.script_parts ?? [])
+    const enFullScript = enParts.map((p) => p.text).join(' ')
+    const frFullScript = frParts.map((p) => p.text).join(' ')
 
-      const updatedData: VideoDraftData = {
-        ...vData,
-        script_parts: partsForThisLang,
-        full_script:  partsForThisLang.map((p) => p.text).join(' '),
-      }
-
+    for (const [lang, parts, fullScript, data] of [
+      ['EN', enParts, enFullScript, enData],
+      ['FR', frParts, frFullScript, frData],
+    ] as const) {
       const saveRes = await fetch(`/api/jobs/${job_id}/draft`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ draft_data: updatedData, content_type: 'video', language: lang }),
+        body:    JSON.stringify({ draft_data: { ...data, script_parts: parts, full_script: fullScript }, content_type: 'video', language: lang }),
       })
       if (!saveRes.ok) {
         const b = await saveRes.json().catch(() => ({}))
@@ -1688,56 +1685,110 @@ export default function JobDetailPage() {
         setApproving(null)
         return
       }
-
-      const triggerRes = await fetch('/api/n8n/trigger', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'video_approve',
-          payload: {
-            job_id,
-            approved_script_parts: partsForThisLang,
-            full_script:           updatedData.full_script,
-            script_config:         vData.script_config,
-            topic:                 job.topic,
-            category:              job.category,
-            language:              lang,
-            script_type:           vData.script_type || 'SOLUTION',
-            video_duration:        String(vData.script_config?.total_duration ?? ''),
-            brand:                 null,
-            persona:               null,
-            category_direction:    null,
-          },
-        }),
-      })
-      if (!triggerRes.ok) {
-        const b = await triggerRes.json().catch(() => ({}))
-        setApproveErrors((prev) => { const m = new Map(prev); m.set('video', `[${lang}] ${b.error ?? 'Failed to trigger video generation'}`); return m })
-        setApproving(null)
-        return
-      }
-
-      await supabase.from('content_drafts')
-        .update({ is_approved: true })
-        .eq('job_id', job_id).eq('content_type', 'video').eq('language', lang)
     }
 
-    await supabase.from('content_jobs')
-      .update({ status: 'generating' })
-      .eq('id', job_id)
-
-    const newApprovedVideo = new Set([...approvedTypes, 'video' as ContentType])
-    setApprovedTypes(newApprovedVideo)
-    setJob((prev) => prev ? { ...prev, status: 'generating' } : prev)
-    setApproving(null)
-    addJob({ jobId: job_id, topic: job.topic, type: 'video', status: 'generating', progress: 0 })
-    clearAfterApproval(job_id)
-    const allTypesVideo = (job.content_types as ContentType[])
-    if (allTypesVideo.length > 1 && allTypesVideo.every((t) => newApprovedVideo.has(t))) {
-      router.push(`/dashboard/library?track=${job_id}`)
+    const triggerRes = await fetch('/api/n8n/trigger', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'video_approve_both',
+        payload: {
+          job_id,
+          topic:           job.topic,
+          category:        job.category,
+          script_type:     enData.script_type || 'SOLUTION',
+          script_config:   enData.script_config,
+          video_duration:  String(enData.script_config?.total_duration ?? ''),
+          en_script_parts: enParts,
+          en_full_script:  enFullScript,
+          fr_script_parts: frParts,
+          fr_full_script:  frFullScript,
+        },
+      }),
+    })
+    if (!triggerRes.ok) {
+      const b = await triggerRes.json().catch(() => ({}))
+      setApproveErrors((prev) => { const m = new Map(prev); m.set('video', b.error ?? 'Failed to trigger video generation'); return m })
+      setApproving(null)
+      return
     }
+
+    await supabase.from('content_drafts')
+      .update({ is_approved: true })
+      .eq('job_id', job_id).eq('content_type', 'video')
+
+  } else {
+    const lang = getEffectiveLanguage('video')
+    const videoDraft = allDrafts.get(draftKey('video', lang))
+    if (!videoDraft) { setApproving(null); return }
+
+    const vData = videoDraft.draft_data as unknown as VideoDraftData
+    const updatedData: VideoDraftData = {
+      ...vData,
+      script_parts: scriptParts,
+      full_script:  scriptParts.map((p) => p.text).join(' '),
+    }
+
+    const saveRes = await fetch(`/api/jobs/${job_id}/draft`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ draft_data: updatedData, content_type: 'video', language: lang }),
+    })
+    if (!saveRes.ok) {
+      const b = await saveRes.json().catch(() => ({}))
+      setApproveErrors((prev) => { const m = new Map(prev); m.set('video', `[${lang}] ${b.error ?? 'Failed to save draft'}`); return m })
+      setApproving(null)
+      return
+    }
+
+    const triggerRes = await fetch('/api/n8n/trigger', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'video_approve',
+        payload: {
+          job_id,
+          approved_script_parts: scriptParts,
+          full_script:           updatedData.full_script,
+          script_config:         vData.script_config,
+          topic:                 job.topic,
+          category:              job.category,
+          language:              lang,
+          script_type:           vData.script_type || 'SOLUTION',
+          video_duration:        String(vData.script_config?.total_duration ?? ''),
+          brand:                 null,
+          persona:               null,
+          category_direction:    null,
+        },
+      }),
+    })
+    if (!triggerRes.ok) {
+      const b = await triggerRes.json().catch(() => ({}))
+      setApproveErrors((prev) => { const m = new Map(prev); m.set('video', `[${lang}] ${b.error ?? 'Failed to trigger video generation'}`); return m })
+      setApproving(null)
+      return
+    }
+
+    await supabase.from('content_drafts')
+      .update({ is_approved: true })
+      .eq('job_id', job_id).eq('content_type', 'video').eq('language', lang)
   }
 
+  await supabase.from('content_jobs')
+    .update({ status: 'generating' })
+    .eq('id', job_id)
+
+  const newApprovedVideo = new Set([...approvedTypes, 'video' as ContentType])
+  setApprovedTypes(newApprovedVideo)
+  setJob((prev) => prev ? { ...prev, status: 'generating' } : prev)
+  setApproving(null)
+  addJob({ jobId: job_id, topic: job.topic, type: 'video', status: 'generating', progress: 0 })
+  clearAfterApproval(job_id)
+  const allTypesVideo = (job.content_types as ContentType[])
+  if (allTypesVideo.length > 1 && allTypesVideo.every((t) => newApprovedVideo.has(t))) {
+    router.push(`/dashboard/library?track=${job_id}`)
+  }
+}
   // ── Image / Blog approve handler ──────────────────────────────────────────────
 
   const handleContentApprove = async (type: 'image_post' | 'blog') => {

@@ -14,9 +14,9 @@ type WebhookType =
   | 'blog'
   | 'social'
   | 'video_approve'
+  | 'video_approve_both'
   | 'image_approve'
   | 'blog_approve'
-
 const WEBHOOK_URLS: Record<WebhookType, string | undefined> = {
   image_post:      process.env.N8N_IMAGE_WEBHOOK,
   image_questions: process.env.N8N_IMAGE_QUESTIONS_WEBHOOK,
@@ -24,6 +24,7 @@ const WEBHOOK_URLS: Record<WebhookType, string | undefined> = {
   blog:            process.env.N8N_BLOG_WEBHOOK,
   social:          process.env.N8N_SOCIAL_WEBHOOK,
   video_approve:   process.env.N8N_VIDEO_APPROVE_WEBHOOK,
+  video_approve_both: process.env.N8N_VIDEO_APPROVE_BOTH_WEBHOOK,
   image_approve:   process.env.N8N_IMAGE_APPROVE_WEBHOOK,
   blog_approve:    process.env.N8N_BLOG_APPROVE_WEBHOOK,
 }
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
   }
   const bodyStr = JSON.stringify(payload)
 
-  const GENERATION_TYPES: WebhookType[] = ['video', 'blog', 'image_post', 'social', 'video_approve', 'image_approve', 'blog_approve']
+  const GENERATION_TYPES: WebhookType[] = ['video', 'blog', 'image_post', 'social', 'video_approve', 'video_approve_both', 'image_approve', 'blog_approve']
 
   try {
     // No timeout for generation types — wait until n8n responds however long it takes.
