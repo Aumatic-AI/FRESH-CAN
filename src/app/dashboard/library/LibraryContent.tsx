@@ -657,6 +657,53 @@ const duration = rawDuration ? Math.round(rawDuration * 10) / 10 : rawDuration
     </>
   )
 }
+// ─── VideoCardGroup ───────────────────────────────────────────────────────────
+// Wraps VideoCard. If a job has both an EN and FR video, shows a language
+// toggle and switches which one displays. If only one language exists for
+// that job, behaves exactly like a plain VideoCard — no toggle shown.
+
+function VideoCardGroup({
+  variants,
+  isLatest,
+  isNew,
+  onDeleted,
+}: {
+  variants: Partial<Record<'EN' | 'FR', VideoLibraryItem>>
+  isLatest: boolean
+  isNew: boolean
+  onDeleted: (id: string) => void
+}) {
+  const available = (['EN', 'FR'] as const).filter((l) => variants[l])
+  const [selected, setSelected] = useState<'EN' | 'FR'>(available[0] ?? 'EN')
+  const activeItem = variants[selected] ?? variants[available[0]]
+
+  if (!activeItem) return null
+
+  if (available.length <= 1) {
+    return <VideoCard item={activeItem} isLatest={isLatest} isNew={isNew} onDeleted={onDeleted} />
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-center">
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+          {available.map((l) => (
+            <button
+              key={l}
+              onClick={() => setSelected(l)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                selected === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {l === 'EN' ? 'English' : 'Français'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <VideoCard item={activeItem} isLatest={isLatest} isNew={isNew} onDeleted={onDeleted} />
+    </div>
+  )
+}
 
 // ─── ImageCard ────────────────────────────────────────────────────────────────
 
@@ -1292,6 +1339,21 @@ function VideoSection() {
     if (sort === 'asc') list = [...list].reverse()
     return list
   }, [items, search, category, lang, sort])
+    // Group filtered items by job_id, so a "Both" job's EN and FR videos
+  // become one card with a toggle, instead of two separate cards.
+  const grouped = useMemo(() => {
+    const map = new Map<string, Partial<Record<'EN' | 'FR', VideoLibraryItem>>>()
+    const order: string[] = []
+    for (const item of filtered) {
+      if (!map.has(item.job_id)) {
+        map.set(item.job_id, {})
+        order.push(item.job_id)
+      }
+      const langKey = item.language === 'FR' ? 'FR' : 'EN'
+      map.get(item.job_id)![langKey] = item
+    }
+    return order.map((jobId) => ({ jobId, variants: map.get(jobId)! }))
+  }, [filtered])
 
   const handleDeleted = useCallback((id: string) => {
     setItems((prev) => prev.filter((v) => v.id !== id))
@@ -1307,16 +1369,16 @@ function VideoSection() {
       )}
       {items.length === 0 ? (
         <EmptyState icon={FileVideo} message="Approve a video script to generate your first video" onAction={() => router.push('/dashboard')} actionLabel="Go to Content Jobs →" />
-      ) : filtered.length === 0 ? (
+            ) : grouped.length === 0 ? (
         <NoFilterResults onClear={() => { setSearch(''); setCategory('all'); setLang('all') }} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((item, i) => (
-            <VideoCard
-              key={item.id}
-              item={item}
+          {grouped.map((g, i) => (
+            <VideoCardGroup
+              key={g.jobId}
+              variants={g.variants}
               isLatest={i === 0 && sort === 'desc'}
-              isNew={newIds.has(item.id)}
+              isNew={Object.values(g.variants).some((v) => v && newIds.has(v.id))}
               onDeleted={handleDeleted}
             />
           ))}
