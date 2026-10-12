@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ImageGenerator } from '../../adapters/types'
+import type { VideoStorageUploader } from '../../adapters/storage'
 import { ProviderCallError } from '../../adapters/types'
 import {
   claimPipeline,
@@ -36,6 +37,27 @@ async function pollUntilDone(
 }
 
 /**
+ * KIE.ai's result URLs live on an ephemeral host (tempfile.aiquickdraw.com,
+ * ~1 week), so every URL is copied into permanent storage before it is
+ * written to content_visual_assets.file_url — never stored as-is. The path
+ * carries the generation plus a timestamp so a regeneration gets a new URL
+ * (public bucket URLs are CDN-cached; overwriting a path serves the old image).
+ */
+async function persistToStorage(
+  uploader: VideoStorageUploader,
+  pipeline: PipelineRow,
+  assetType: 'hero_image' | 'inline_image',
+  tempUrl: string,
+): Promise<string> {
+  const ext = /\.(png|jpe?g|webp)$/i.exec(new URL(tempUrl).pathname)?.[1]?.toLowerCase() ?? 'png'
+  const kind = assetType === 'hero_image' ? 'hero' : 'inline'
+  return uploader.uploadFromUrl(
+    `${pipeline.job_id}/blog-${kind}-g${pipeline.current_generation}-${Date.now().toString(36)}.${ext}`,
+    tempUrl,
+  )
+}
+
+/**
  * Shared, pipeline-scoped step — one of two (hero + inline). Both run
  * concurrently once generate_outline succeeds; the pipeline only advances to
  * 'ready' (shared_visual_ready) once BOTH have a 'ready' content_visual_assets
@@ -57,6 +79,7 @@ export async function runGenerateVisualImage(
   assetType: 'hero_image' | 'inline_image',
   prompt: string,
   imageGenerator: ImageGenerator,
+  uploader: VideoStorageUploader,
   backoffBaseDelayMs = 5000,
   referenceImageUrl?: string,
 ): Promise<{ ran: boolean }> {
@@ -102,13 +125,14 @@ export async function runGenerateVisualImage(
         try {
           const recheck = await imageGenerator.poll({ providerRef: existing.provider_ref })
           if (recheck.status === 'ready') {
+            const permanentUrl = await persistToStorage(uploader, pipeline, assetType, recheck.fileUrl)
             await upsertVisualAsset(client, {
               contentPipelineId: pipeline.id,
               generation,
               assetType,
               status: 'ready',
               providerRef: existing.provider_ref,
-              fileUrl: recheck.fileUrl,
+              fileUrl: permanentUrl,
               attemptNumber: existing.attempt_number,
             })
             await recordStepAttempt(client, {
@@ -118,7 +142,7 @@ export async function runGenerateVisualImage(
               attemptNumber: existing.attempt_number,
               status: 'succeeded',
               provider: 'kie',
-              outputSnapshot: { fileUrl: recheck.fileUrl },
+              outputSnapshot: { fileUrl: permanentUrl },
             })
             await tryAdvanceToSharedVisualReady(client, pipeline.id, generation)
             return { ran: true }
@@ -161,13 +185,14 @@ export async function runGenerateVisualImage(
       const outcome = await pollUntilDone(imageGenerator, jobRef)
 
       if ('fileUrl' in outcome) {
+        const permanentUrl = await persistToStorage(uploader, pipeline, assetType, outcome.fileUrl)
         await upsertVisualAsset(client, {
           contentPipelineId: pipeline.id,
           generation,
           assetType,
           status: 'ready',
           providerRef: jobRef.providerRef,
-          fileUrl: outcome.fileUrl,
+          fileUrl: permanentUrl,
           attemptNumber,
         })
         await recordStepAttempt(client, {
@@ -177,7 +202,7 @@ export async function runGenerateVisualImage(
           attemptNumber,
           status: 'succeeded',
           provider: 'kie',
-          outputSnapshot: { fileUrl: outcome.fileUrl },
+          outputSnapshot: { fileUrl: permanentUrl },
         })
       } else {
         const detail = 'failed' in outcome ? outcome.detail : 'KIE.ai poll timed out'

@@ -314,6 +314,18 @@ function noTextVariantFor(brand: BrandProfile, presence: UnitPresence): string {
  *  shared with the real compositing math via watermarkGeometry.ts so this
  *  description can never drift from where the logo actually lands. Video
  *  has no watermark step — this block is image-only. */
+/** Image counterpart of video's NO_ENTRY_EXIT_RULE (composeText.ts): the
+ *  unit's door is only ever shown closed, and nobody is pictured crossing
+ *  its threshold. Added 2026-10-12 after a real blog hero (job e9e4ed33)
+ *  drew a customer stepping up onto a platform at the open rear door.
+ *  Appended wherever the unit is in frame (blog hero/inline, image_post
+ *  photo); brand.positiveVisualTruths states the same rule but no composer
+ *  reads that field. */
+const NO_ENTRY_EXIT_IMAGE_CLAUSE =
+  'Everyone is wholly inside or wholly outside the unit — never show anyone stepping in or out, climbing up ' +
+  'or down, or standing in the doorway. Its door is closed with nobody at or in it; customers stay outside ' +
+  'beside the unit (or already carrying their groceries), and any interior view shows people only inside.'
+
 function watermarkSafeZoneBlock(): string {
   const cornerPercent = Math.round(SAFE_ZONE_RADIUS_FRACTION * 100)
   return (
@@ -645,6 +657,7 @@ function composeBlogImage(
       parts.push(describeReferencePhoto(reference))
       referenceImageUrl = reference.url
     }
+    parts.push(NO_ENTRY_EXIT_IMAGE_CLAUSE)
   } else {
     parts.push(GENERIC_DOCUMENTARY_HINT)
     parts.push(unitBrandingBlock(brand, 'none'))
@@ -1389,6 +1402,7 @@ export function composePhotoPrompt(brand: BrandProfile, job: PhotoJob): ImageCom
       parts.push(describeReferencePhoto(reference))
       referenceImageUrl = reference.url
     }
+    parts.push(NO_ENTRY_EXIT_IMAGE_CLAUSE)
   } else {
     parts.push(unitBrandingBlock(brand, 'none'))
   }

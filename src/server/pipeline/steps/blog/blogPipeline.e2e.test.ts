@@ -14,6 +14,7 @@ import { runGenerateOutline } from './generateOutline'
 import { runGenerateVisualImage } from './generateVisualImage'
 import { runGenerateCopy } from './generateCopy'
 import { runFinalizeDraft } from './finalizeDraft'
+import type { VideoStorageUploader } from '../../adapters/storage'
 import type { ScriptGenerator, ScriptGenerationInput, ImageGenerator, ImagePollResult } from '../../adapters/types'
 
 const hasCreds = !!process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -71,6 +72,11 @@ function makeFlakyImageGenerator(failFirstNSubmits: number) {
     }),
   )
   return { submit, poll } satisfies ImageGenerator
+}
+
+const fakeUploader: VideoStorageUploader = {
+  uploadBuffer: async (path) => `https://storage.example/${path}`,
+  uploadFromUrl: async (path) => `https://storage.example/${path}`,
 }
 
 describe.skipIf(!hasCreds)('Blog pipeline end-to-end (real DB, mocked providers)', () => {
@@ -146,8 +152,8 @@ describe.skipIf(!hasCreds)('Blog pipeline end-to-end (real DB, mocked providers)
       { topic: 't', category: 'c', targetAudience: 'a' },
       script,
     )
-    await runGenerateVisualImage(client, pipeline, 'hero_image', 'a hero image', image)
-    await runGenerateVisualImage(client, pipeline, 'inline_image', 'an inline image', image)
+    await runGenerateVisualImage(client, pipeline, 'hero_image', 'a hero image', image, fakeUploader)
+    await runGenerateVisualImage(client, pipeline, 'inline_image', 'an inline image', image, fakeUploader)
   }
 
   async function runTrackSteps(
@@ -226,7 +232,7 @@ describe.skipIf(!hasCreds)('Blog pipeline end-to-end (real DB, mocked providers)
     const goodImage = makeMockImageGenerator()
 
     // hero: first attempt fails
-    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'hero_image', 'hero', flakyImage, 0)
+    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'hero_image', 'hero', flakyImage, fakeUploader, 0)
     const { data: heroAfterFail } = await client
       .from('content_visual_assets')
       .select('*')
@@ -237,7 +243,7 @@ describe.skipIf(!hasCreds)('Blog pipeline end-to-end (real DB, mocked providers)
     expect(heroAfterFail.attempt_number).toBe(1)
 
     // inline: succeeds on its first (and only) attempt — independent counter, unaffected by hero's failure
-    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'inline_image', 'inline', goodImage, 0)
+    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'inline_image', 'inline', goodImage, fakeUploader, 0)
     const { data: inlineAfterSuccess } = await client
       .from('content_visual_assets')
       .select('*')
@@ -248,7 +254,7 @@ describe.skipIf(!hasCreds)('Blog pipeline end-to-end (real DB, mocked providers)
     expect(inlineAfterSuccess.attempt_number).toBe(1) // NOT inflated by hero's failed attempt
 
     // hero: retry (backoffBaseDelayMs=0) — succeeds this time
-    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'hero_image', 'hero', flakyImage, 0)
+    await runGenerateVisualImage(client, pAfterOutline as PipelineRow, 'hero_image', 'hero', flakyImage, fakeUploader, 0)
     const { data: heroAfterRetry } = await client
       .from('content_visual_assets')
       .select('*')

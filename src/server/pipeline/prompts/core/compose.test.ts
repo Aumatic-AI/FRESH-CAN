@@ -444,6 +444,26 @@ describe('composeHeroPrompt / composeInlinePrompt', () => {
   })
 })
 
+describe('no entry/exit clause (unit in frame only)', () => {
+  const CLAUSE = 'never show anyone stepping in or out'
+  const blogJob = { pipelineId: 'pipeline-noentry', topic: 'Winter grocery access', category: 'Food Desert Education' }
+
+  it('is in blog hero/inline and photo prompts when the unit is shown', () => {
+    expect(composeHeroPrompt(testBrand, { ...blogJob, unitPresence: 'featured' }).prompt).toContain(CLAUSE)
+    expect(composeInlinePrompt(testBrand, { ...blogJob, unitPresence: 'background' }).prompt).toContain(CLAUSE)
+    expect(
+      composePhotoPrompt(testBrand, { pipelineId: 'p', scene: 'a customer outside', unitPresence: 'featured' } as never).prompt,
+    ).toContain(CLAUSE)
+  })
+
+  it('is omitted when no unit is in the frame', () => {
+    expect(composeHeroPrompt(testBrand, { ...blogJob, unitPresence: 'none' }).prompt).not.toContain(CLAUSE)
+    expect(
+      composePhotoPrompt(testBrand, { pipelineId: 'p', scene: 'a garden', unitPresence: 'none' } as never).prompt,
+    ).not.toContain(CLAUSE)
+  })
+})
+
 describe('composePhotoPrompt', () => {
   const baseJob = {
     pipelineId: 'pipeline-photo-1',

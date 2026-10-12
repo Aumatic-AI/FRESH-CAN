@@ -23,6 +23,7 @@ import {
 import { interpretIntent } from '../../server/pipeline/steps/shared/interpretIntent'
 import { runGenerateOutline, type OutlineJobInput } from '../../server/pipeline/steps/blog/generateOutline'
 import { generateReferenceCopy, type OutlineSection } from '../../server/pipeline/steps/blog/generateReferenceCopy'
+import { SupabaseVideoStorageUploader } from '../../server/pipeline/adapters/storage'
 import { runGenerateVisualImage } from '../../server/pipeline/steps/blog/generateVisualImage'
 import { runGenerateCopy, type CopyJobInput } from '../../server/pipeline/steps/blog/generateCopy'
 import { runFinalizeDraft } from '../../server/pipeline/steps/blog/finalizeDraft'
@@ -179,7 +180,7 @@ async function runVisualUntilSettled(
   for (let attempt = 0; attempt < MAX_RETRY_LOOP_ITERATIONS; attempt++) {
     const outcome = await step.run(`generate-${assetType}-${attempt}`, async () => {
       const current = await fetchPipeline(pipelineId)
-      await runGenerateVisualImage(client, current, assetType, prompt, imageGenerator, 5000, referenceImageUrl)
+      await runGenerateVisualImage(client, current, assetType, prompt, imageGenerator, new SupabaseVideoStorageUploader(client), 5000, referenceImageUrl)
       const assets = await getVisualAssets(client, pipelineId, current.current_generation)
       const asset = assets.find((a) => a.asset_type === assetType)
       const freshPipeline = await fetchPipeline(pipelineId)
