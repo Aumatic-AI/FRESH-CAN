@@ -9,6 +9,7 @@
 import type {
   BrandProfile,
   BrandReferenceImage,
+  UnitView,
   CastBibleEntry,
   ImageStyle,
   SceneVisualState,
@@ -128,6 +129,16 @@ function moodClause(): string {
  *  angle, unlike mood which is shared per pipeline. */
 function pickReferenceFrom(pool: readonly BrandReferenceImage[], seed: string): BrandReferenceImage | undefined {
   return pool.length > 0 ? pickDeterministic(seed, pool) : undefined
+}
+
+/** The brand's exterior photo for a planned view, or undefined when the brand
+ *  has none for it. Scene selection is by the planner's `unit_view`, never a
+ *  hash, so a scene framing the rear door is built from the rear photo. */
+export function pickExteriorByView(
+  brand: BrandProfile,
+  view: UnitView | undefined,
+): BrandReferenceImage | undefined {
+  return view ? brand.referenceImages.exterior.find((r) => r.view === view) : undefined
 }
 
 type SceneType = 'exterior' | 'interior'
@@ -797,6 +808,10 @@ interface SceneImageJob {
    *  hallucinated/wrong element, while keeping a harmless quality guard
    *  when food isn't actually present costs nothing but a few characters. */
   unitPresence?: UnitPresence
+  /** THIS scene's planned unit_view. Only 'rear'/'rear34' switch the edit
+   *  source to that real photo (the shared characterRefUrl is a side view, so
+   *  it cannot show the rear door); 'side'/undefined keep characterRefUrl. */
+  unitView?: UnitView
   containsFood?: boolean
   /** THIS scene's own Layer 2 app_on_screen — is a person shown using the
    *  brand's app. Undefined defaults to 'none' (never adds the palette
@@ -937,6 +952,15 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     job.setting === 'interior' && (job.unitPresence ?? 'none') !== 'none'
       ? pickReferenceFrom(brand.referenceImages.interior, `${job.pipelineId}:${job.sceneNumber}:interior`)
       : undefined
+  // Rear-facing scenes edit from the matching real photo rather than the
+  // side-view character_ref (which has no door, so the model had to invent one).
+  const viewRef =
+    showSubject && !interiorRef && job.unitView && job.unitView !== 'side'
+      ? pickExteriorByView(brand, job.unitView)
+      : undefined
+  const viewClause = viewRef
+    ? `Reference photo: ${viewRef.whatItShows} The rear door stays closed and nobody stands in or at the doorway.`
+    : ''
   const look = sceneLookClause(job.look)
 
   // Everything below is a fixed brand/safety constraint sent in full,
@@ -957,6 +981,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     appClause,
     interiorRef ? interiorBlock(brand) : unitBrandingBlock(brand, unitPresence),
     showSubject ? REFERENCE_IS_GUIDE_NOT_COPY : '',
+    viewClause,
     showSubject ? brand.noNewTextInstruction : noTextVariantFor(brand, unitPresence),
   ].filter(Boolean)
   const fixedLen = fixedParts.join(' ').length
@@ -1085,8 +1110,9 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     // looking like the character-ref's own plain reference shot instead of
     // that scene's actual visual_description.
     parts.push(REFERENCE_IS_GUIDE_NOT_COPY)
+    if (viewClause) parts.push(viewClause)
     parts.push(brand.noNewTextInstruction)
-    referenceImageUrl = interiorRef ? interiorRef.url : job.characterRefUrl
+    referenceImageUrl = interiorRef ? interiorRef.url : (viewRef?.url ?? job.characterRefUrl)
   } else {
     // No reference image attached at all for a non-relevant scene — a pure
     // text-to-image generation, so edit-mode's own bias toward
@@ -1164,6 +1190,11 @@ interface SceneVideoJob {
    *  WORDMARK_LEGIBILITY_CLAUSE, since only those scenes have a real branded
    *  wordmark in the reference frame for the clip to keep legible. */
   unitPresence?: UnitPresence
+  /** How many people the reference frame shows (the scene's planned
+   *  visual_state.people). When a plain positive integer, the clip is told that
+   *  exactly that many people appear — real job a64ab879 scene 1 grew a second
+   *  mother mid-clip. Omitted/invalid keeps the generic "add nothing new" line. */
+  peopleCount?: number
 }
 
 /** Prompt for Seedance 1.5 Pro image-to-video (adapters/kie.ts's
@@ -1255,6 +1286,12 @@ function lookHoldClause(look: VideoScriptLook | null | undefined): string {
 // weighted against the one sentence that says what to draw/animate).
 // Camera stability itself is already covered by the motion-layers
 // paragraph's "smooth, real-camera motion" — not repeated here.
+// Real jobs (a64ab879 clip 4, 11s) replayed the same lamppost/pillar every
+// ~4-5s: the video model repeats a scrolling background over a long take. The
+// backdrop must stay put; only the subject and gentle light/wind move.
+const NO_REPEATING_BACKGROUND_CLAUSE =
+  ' Fixed background: never pan or scroll past repeating poles, trees or buildings; no replayed motion.'
+
 const TEMPORAL_CONSISTENCY_CLAUSE =
   ' Keep textures, packaging details, and lighting stable and flicker-free across every frame, with natural, ' +
   'non-warped motion blur.'
@@ -1313,21 +1350,28 @@ const WORDMARK_LEGIBILITY_CLAUSE =
 export function composeSceneVideoPrompt(job: SceneVideoJob): string {
   const appClause = (job.appUiVideoClause ?? '') + (job.sceneGuardVideoClause ?? '')
   const hasUnit = !!job.unitPresence && job.unitPresence !== 'none'
+  const n = job.peopleCount
+  const peopleClause =
+    typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 8
+      ? `preserve every limb and object exactly as shown and add nothing new. The frame shows exactly ${n} ` +
+        `${n === 1 ? 'person' : 'people'}: no one else ever appears, walks in, or is duplicated.`
+      : 'preserve every person, limb, and object exactly as shown and add nothing new.'
   const suffix =
     " Animate this as three distinct layers: the subject's own action described above; any natural ambient " +
     'motion already implied by the setting — wind moving hair, fabric, or leaves, water, ' +
     'shifting light — but never motion with no real ' +
-    'cause: produce, packaged goods, and other solid objects at rest must stay completely still unless a ' +
-    'visible hand, wind, or other real force is actually moving them; and camera motion as a separate layer ' +
+    'cause: produce, goods and other solid objects at rest stay still unless a ' +
+    'visible hand, wind, or other real force moves them; and camera motion as a separate layer ' +
     'on top of those two — follow whatever camera direction is given above (pans, tilts, tracking, slow ' +
     'dolly, rack focus) with smooth, real-camera motion. Camera movement is never a substitute for actual ' +
-    'subject or environmental motion. Never a jump cut, and never a staged product-reveal move like a slow ' +
-    'orbit or a dramatic hero push-in around the subject. The reference frame is the source of truth — ' +
-    'preserve every person, limb, and object exactly as shown and add nothing new.' +
+    'subject or environmental motion. Never a jump cut or a staged product-reveal move (slow ' +
+    'orbit, dramatic hero push-in). The reference frame is the source of truth — ' +
+    peopleClause +
     NO_PHANTOM_EFFECTS_CLAUSE +
     NO_ENTRY_EXIT_CLIP_CLAUSE +
     SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
     TEMPORAL_CONSISTENCY_CLAUSE +
+    NO_REPEATING_BACKGROUND_CLAUSE +
     VIDEO_VISUAL_QUALITY_STYLE +
     lookHoldClause(job.look) +
     (hasUnit ? UNIT_DESIGN_LOCK_CLAUSE + WORDMARK_LEGIBILITY_CLAUSE : '') +

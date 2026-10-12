@@ -75,7 +75,7 @@ export const BRAND_PROFILE: BrandProfile = {
   ],
 
   positiveVisualTruths: [
-    'Entry (outside only): a discreet QR/scan reader at the rear entrance; a customer stands beside it holding up a phone — never shown stepping in.',
+    'Entry (outside only): a small white square QR panel on the rear face, beside the rear door; a customer stands beside it holding up a phone — never shown stepping in.',
     'Inside: a narrow single aisle, realistic occupancy (typically 1-3 people), shelves and glass-door ' +
       'fridges, unobtrusive ceiling cameras/sensors.',
     'Exit (outside only): a customer already outside, standing or walking near the unit with their items — never shown stepping out.',
@@ -115,7 +115,8 @@ export const BRAND_PROFILE: BrandProfile = {
       'mounted on back. The cab is plain white and unbranded; all branding is on the container only. The ' +
       'white "Fresh [maple leaf icon] CAN" wordmark, never distorted, appears once, centered, on each of ' +
       'the two side panels — nowhere else on the vehicle. The front face (where it meets the cab) and the ' +
-      'rear face are both plain maroon with no wordmark or signage. The front face and both side panels are ' +
+      'rear face are both plain maroon with no wordmark; the rear face carries only one small white square QR ' +
+      'panel beside the door. The front face and both side panels are ' +
       "solid, unbroken maroon steel; the rear face holds the vehicle's only opening — a black-frame glass " +
       'double door flush at bumper height, reached straight from the ground — which is the only entrance and ' +
       'the only place customers are ever served.',
@@ -136,9 +137,10 @@ export const BRAND_PROFILE: BrandProfile = {
   forbiddenOnUnit: [
     'No door, hatch, service window, vent, or fixture of any kind on the front face or either side — the ' +
       'rear glass double door is the only entrance and only opening, on any face.',
-    'No wordmark, logo, signage, or QR code on the front or rear faces — the wordmark appears exactly once ' +
-      'per side panel, nowhere else on the vehicle.',
-    'No other text, graphics, decals, stripes, URLs, or QR panels anywhere on the unit.',
+    'No wordmark, logo or signage on the front or rear faces — the wordmark appears exactly once ' +
+      'per side panel, nowhere else on the vehicle. The only addition allowed is the one small white square QR ' +
+      'panel on the rear face beside the door.',
+    'No other text, graphics, decals, stripes, URLs, or QR panels anywhere on the unit (the single rear-face QR panel excepted).',
     'The cab is plain white and completely unbranded.',
     'Colour and structure identical in every appearance — always this exact maroon (#6B1A1A), wordmark never ' +
       'distorted.',
@@ -183,12 +185,17 @@ export const BRAND_PROFILE: BrandProfile = {
   },
   appUi: {
     imageClause:
-      'Any Fresh-CAN app phone screen is ONLY deep maroon (#6B1A1A) and white: white background, maroon header, ' +
-      'buttons and icons, maroon QR code on white. No other colors, gradients, or dark mode; little readable text.',
+      'Fresh-CAN app phone screens are ONLY maroon (#6B1A1A) and white: white background, maroon header, ' +
+      'buttons, icons and QR code; no other colors, gradients or dark mode; little text. One screen, on the ' +
+      'phone\'s front only.',
     videoClause:
       ' Any phone screen showing the Fresh-CAN app stays strictly maroon (#6B1A1A) and white in every frame — ' +
-      'never any other UI color.',
+      'never red, green or any other UI color. The phone has one screen, on its front only; its plain back faces ' +
+      'what is scanned.',
   },
+  // How the speech-to-text step tends to mis-hear the brand's second word
+  // (real job f63f3f5c captioned "Fresh Khan"); used only to repair captions.
+  asrMishearings: ['khan', 'kan', 'kahn', 'cann', 'cahn'],
   ctaBarColorDescriptor: 'a solid charcoal-black band, similar to hex #1F1F1F',
 
   // Fallback ONLY — real ElevenLabs voice IDs, used by synthesizeVoice.ts
@@ -207,44 +214,42 @@ export const BRAND_PROFILE: BrandProfile = {
   // specific photo shows, since the image adapter edits from it; `disregard`
   // lists every real-but-non-canonical element that specific photo shows, so
   // nothing is left for the model to notice and try to faithfully reproduce.
-  // `standing` is listed FIRST because composeCharacterRefPrompt always uses
-  // referenceImages.exterior[0] — this is the one photo showing the real
-  // wordmark in its correct, simplified location with the least competing
-  // real content in the same frame.
+  // The side profile is listed FIRST because composeCharacterRefPrompt always
+  // uses referenceImages.exterior[0]. These three are retouched (2026-10-10)
+  // so nothing real-but-non-canonical remains in frame: no extra wordmarks,
+  // QR panel, URL text, vents or graphic wave, and no door anywhere but the
+  // rear — hence empty `disregard`. Each entry carries its `view`; video
+  // scenes pick by the planner's `unit_view` (compose.ts pickExteriorByView).
+  // Both rear photos (_clean_2) show the single entry QR panel beside the door.
   referenceImages: {
     exterior: [
       {
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_standing.png',
+        view: 'side',
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_side_clean.png',
         whatItShows:
-          'Camera positioned directly to the side of the container, a full profile view along its length, ' +
-          'showing the real "Fresh CAN" wordmark in its correct place — reproduce that exact wordmark ' +
-          'faithfully, once.',
-        disregard: [
-          'a decorative red graphic wave on the side',
-          '"fresh-can.com" URL text on the side',
-          'two small dark ventilation grilles on the side',
-        ],
+          'Camera positioned directly to the side of the truck, a full profile view of the whole container ' +
+          'and the white cab: both side panels are one solid, unbroken corrugated maroon wall carrying a ' +
+          'single "Fresh CAN" wordmark — reproduce that exact wordmark faithfully, once.',
+        disregard: [],
       },
       {
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_back.png',
+        view: 'rear34',
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_rear34_clean_2.png',
         whatItShows:
-          'Camera positioned directly behind the truck, straight-on, facing the rear entrance doors ' +
-          'dead-on.',
-        disregard: [
-          'a small second wordmark on the header bar above the door',
-          'a "Scan to Shop Fresh" QR-code panel to the left of the door',
-        ],
+          'Camera positioned behind and to the side of the truck, a rear three-quarter view: the glass double ' +
+          'door and one small white square QR panel to its right are on the rear face only (the rear face ' +
+          'carries no wordmark), while the long side panel stays solid maroon with a single "Fresh CAN" ' +
+          'wordmark and no opening of any kind.',
+        disregard: [],
       },
       {
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_arrival.png',
+        view: 'rear',
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_rear_clean_2.png',
         whatItShows:
-          'Camera positioned ahead and to the side of the truck, a three-quarter front view, driver visible ' +
-          'through the windshield.',
-        disregard: [
-          "a large wordmark on the container's front face",
-          'a decorative red graphic accent on the visible side panel',
-          'small "fresh-can.com" text on the visible side panel',
-        ],
+          'Camera positioned directly behind the truck, straight-on, facing the rear entrance: a black-frame ' +
+          'glass double door, plain unbranded maroon on either side of it, and one small white square QR panel ' +
+          'on the rear face to the right of the door (as seen from behind) — reproduce that single panel once.',
+        disregard: [],
       },
     ],
     interior: [

@@ -6,20 +6,18 @@ app only ever uses the public URLs pasted into
 `src/server/pipeline/prompts/brand/fresh-can.ts`, since Flux Kontext needs a
 URL it can fetch itself, not a local file).
 
-All three exterior angles are uploaded (2026-09-10) to the public
-`brand-assets` Supabase bucket and wired into
-`src/server/pipeline/prompts/brand/fresh-can.ts`'s `referenceImages.exterior`
-array, each paired with `framing` text describing what that specific photo
-shows:
-- `truck_exterior_back.png` — the true rear-entrance shot (the door, header
-  bar wordmark) matching what `containerDescriptor` describes.
-- `truck_exterior_arrival.png` — a three-quarter front view of the truck
-  arriving/parked at the curb.
-- `truck_exterior_standing.png` — a full side-profile view.
+The exterior set is three retouched photos (2026-10-10), uploaded to the public
+`brand-assets` bucket and wired into `referenceImages.exterior` in
+`src/server/pipeline/prompts/brand/fresh-can.ts`, each tagged with its `view`:
+- `truck_exterior_side_clean.png` (`side`) — full side profile, one wordmark.
+  Always index 0 (the character-ref is generated from it).
+- `truck_exterior_rear34_clean_2.png` (`rear34`) — rear three-quarter view with the QR panel.
+- `truck_exterior_rear_clean_2.png` (`rear`) — straight-on rear door with the QR panel.
 
-`composeHeroPrompt`/`composeInlinePrompt`/`composePhotoPrompt` each pick one
-of the three independently (deterministically, so retries are stable) —
-see `core/rotation.ts` and `core/compose.ts`.
+The old photos (`truck_exterior_{standing,back,arrival}.png`) were removed; do
+not re-add them (a test fails if they are referenced). Video scenes pick the
+photo matching the planner's `unit_view` (`core/compose.ts` `pickExteriorByView`);
+blog/photo still pick one by hash.
 
 `freshcan_interior_1.png` / `freshcan_interior_2.png` aren't used — no
 current prompt builds an interior scene, so there's nothing for them to
@@ -40,5 +38,5 @@ guide. Keep them here for when an interior-scene prompt template exists.
    mismatched framing/photo pairs confuse Flux Kontext's image-editing mode.
 
 Re-running the upload command with an existing filename overwrites that
-object at the same URL (upsert), so replacing a photo with a corrected
-version never requires editing the brand file again.
+object at the same URL, but CDNs may serve the old bytes — upload a corrected
+photo under a NEW filename and update its `url` in the brand file.

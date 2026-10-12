@@ -466,20 +466,33 @@ describe('composeVideoScriptSystemPrompt', () => {
 
   it('asks for real cinematographic shot variety and camera direction, as a quality bar rather than a style directive', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
-    expect(prompt).toContain('wide establishing shots, medium shots, close-ups, over-the-shoulder, tracking shots')
+    expect(prompt).toContain('(wide, medium, close-up, low-angle, over-the-shoulder)')
     expect(prompt).toContain('never a directive on what mood or overall style to use')
   })
 
-  it('requires shot_notes to carry real camera direction, not default to empty', () => {
+  it('makes every shot locked-off and static, and keeps each action small enough for one frame (the video model scrolls and morphs backgrounds when the camera travels)', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
-    expect(prompt).toContain('never left empty by default')
+    expect(prompt).toContain('THE CAMERA NEVER MOVES')
+    expect(prompt).toContain('every shot is locked-off and static, never a pan or track')
+    expect(prompt).toContain('never a long walk toward or away from the camera')
   })
 
-  it('asks camera movement in shot_notes to be physically specific (start position, direction, speed, end state), not a vague mood word', () => {
+  it('requires shot_notes to carry concrete framing, never a vague mood word', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
-    expect(prompt).toContain('starting camera position, direction, and approximate speed, and where it ends up')
-    expect(prompt).toContain('slow lateral tracking shot moving left to right at a constant distance from the subject')
-    expect(prompt).toContain('never just "cinematic camera movement" or "dynamic shot" with no physical detail behind it')
+    expect(prompt).toContain('never just "cinematic" or "dynamic shot"')
+  })
+
+  it('gives static example shot notes and forbids every camera move by name', () => {
+    const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
+    expect(prompt).toContain('static low-angle wide shot, shallow depth of field, soft window light')
+    expect(prompt).toContain('never a pan, tilt, track, follow, dolly, zoom, push-in, orbit or handheld move')
+  })
+
+  it('keeps the unit large (or out), shows the door closed, and sends leaving-with-groceries scenes to the side view', () => {
+    const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
+    expect(prompt).toContain('fills at least a third of the frame width')
+    expect(prompt).toContain('door is always shown closed with nobody in or at the doorway')
+    expect(prompt).toContain('a customer who has finished shopping and is leaving with groceries')
   })
 
   it('asks visual_description to include ambient environmental motion, not just the subject', () => {
@@ -662,7 +675,7 @@ describe('composeVideoScriptSystemPrompt', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
     expect(prompt).toContain('Ground it in this scene\'s own story beat and purpose from your planning above')
     expect(prompt).toContain('how it connects to the scene immediately before it')
-    expect(prompt).toContain('Choose composition and camera movement that serve THIS scene\'s specific purpose')
+    expect(prompt).toContain('Choose the angle and framing that serve THIS scene\'s specific purpose')
   })
 
   it('asks a chosen visual motif to recur across scenes rather than appear once', () => {

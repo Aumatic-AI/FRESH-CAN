@@ -7,6 +7,7 @@ import {
   composeSceneImageEditPrompt,
   composeSceneVideoPrompt,
   composeCharacterRefPrompt,
+  pickExteriorByView,
   appUiVideoClause,
   sceneGuardVideoClause,
 } from './compose'
@@ -960,7 +961,7 @@ describe('composeSceneVideoPrompt', () => {
 
   it('steers camera motion away from staged product-reveal moves like orbits or hero push-ins', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('never a staged product-reveal move like a slow orbit or a dramatic hero push-in')
+    expect(prompt).toContain('or a staged product-reveal move (slow orbit, dramatic hero push-in)')
   })
 
   it('gives real cinematographic technique explicit positive permission, not just "subtle" motion', () => {
@@ -978,8 +979,8 @@ describe('composeSceneVideoPrompt', () => {
   it('forbids illogical motion on static objects (e.g. produce) with no visible cause — regression for real Seedance renders showing vegetables/groceries drifting on their own', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
     expect(prompt).toContain('never motion with no real cause')
-    expect(prompt).toContain('produce, packaged goods, and other solid objects at rest must stay completely still')
-    expect(prompt).toContain('unless a visible hand, wind, or other real force is actually moving them')
+    expect(prompt).toContain('produce, goods and other solid objects at rest stay still')
+    expect(prompt).toContain('unless a visible hand, wind, or other real force moves them')
   })
 
   it('guards against frame-to-frame flicker and warped motion blur, regardless of look/isFinalScene', () => {
@@ -999,7 +1000,7 @@ describe('composeSceneVideoPrompt', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: longText, shotNotes: longText })
     expect(prompt.length).toBeLessThanOrEqual(2500)
     expect(prompt).toContain('never motion with no real cause')
-    expect(prompt).toContain('never a staged product-reveal move')
+    expect(prompt).toContain('staged product-reveal move')
   })
 
   it('does not truncate a normal, realistic scene at all', () => {
@@ -1095,7 +1096,7 @@ describe('Fresh-CAN brand unit descriptor', () => {
   it('confines the logo to the side panels only, and explicitly rules out the front/rear/duplicates — regression for real reference photos actually showing it in 2-3 places at once', () => {
     expect(BRAND_PROFILE.unit.full).toMatch(/wordmark.*appears once, centered, on each of\s+the two side panels/i)
     expect(BRAND_PROFILE.unit.full).toContain('nowhere else on the vehicle')
-    expect(BRAND_PROFILE.forbiddenOnUnit.join(' ')).toContain('No wordmark, logo, signage, or QR code on the front or rear faces')
+    expect(BRAND_PROFILE.forbiddenOnUnit.join(' ')).toContain('No wordmark, logo or signage on the front or rear faces')
   })
 
   it('the first exterior reference photo (character-ref\'s fixed source) shows the logo in exactly that correct side-only location', () => {
@@ -1441,5 +1442,112 @@ describe('aspect-ratio framing on video scene stills', () => {
   it('does not tell the model what NOT to do — no "never ... collage" boilerplate in the shared quality floor', () => {
     const { prompt } = composeSceneImagePrompt(BRAND_PROFILE, { ...job, aspectRatio: '9:16' })
     expect(prompt).not.toMatch(/never[^.]*collage/i)
+  })
+})
+
+describe('composeSceneVideoPrompt — headcount (job a64ab879 grew a second mother)', () => {
+  const base = { visualDescription: 'A mother and son walk home.', shotNotes: null, unitPresence: 'featured' as const }
+
+  it('names the exact number of people when the plan gives a count', () => {
+    expect(composeSceneVideoPrompt({ ...base, peopleCount: 2 })).toContain('exactly 2 people')
+    expect(composeSceneVideoPrompt({ ...base, peopleCount: 1 })).toContain('exactly 1 person:')
+  })
+
+  it('is unchanged when the count is missing or not a sane integer', () => {
+    const plain = composeSceneVideoPrompt(base)
+    for (const bad of [undefined, 0, -1, 2.5, 99, Number.NaN]) {
+      expect(composeSceneVideoPrompt({ ...base, peopleCount: bad as number })).toBe(plain)
+    }
+    expect(plain).toContain('preserve every person, limb, and object exactly as shown and add nothing new.')
+  })
+
+  it('still fits the sceneVideo prompt cap with a long description', () => {
+    const long = 'A mother and her son walk along a quiet street at dusk. '.repeat(60)
+    const prompt = composeSceneVideoPrompt({ ...base, visualDescription: long, shotNotes: long, peopleCount: 2, isFinalScene: true })
+    expect(prompt.length).toBeLessThanOrEqual(2450)
+    expect(prompt).toContain('exactly 2 people')
+  })
+})
+
+describe('app phone rules (job f63f3f5c: screens on both sides, red/green UI)', () => {
+  it('say one screen on the front only, in image and video clauses', () => {
+    expect(BRAND_PROFILE.appUi!.imageClause).toMatch(/One screen, on the phone's front only/)
+    expect(BRAND_PROFILE.appUi!.videoClause).toContain('one screen')
+    expect(BRAND_PROFILE.appUi!.videoClause).toMatch(/never red, green/)
+  })
+  it('still fit the video prompt cap with the app clause and a long description', () => {
+    const long = 'Close-up of a woman scanning a QR code with her phone. '.repeat(60)
+    const prompt = composeSceneVideoPrompt({
+      visualDescription: long,
+      shotNotes: long,
+      unitPresence: 'featured',
+      peopleCount: 2,
+      isFinalScene: true,
+      appUiVideoClause: BRAND_PROFILE.appUi!.videoClause,
+      sceneGuardVideoClause: BRAND_PROFILE.sceneGuard!.video,
+    })
+    expect(prompt.length).toBeLessThanOrEqual(2450)
+  })
+})
+
+describe('exterior reference photos by view', () => {
+  const job = {
+    pipelineId: 'p-view',
+    sceneNumber: 2,
+    visualDescription: 'A woman holds her phone up beside the unit\'s rear door',
+    shotNotes: null,
+    characterRefUrl: 'https://example.com/character-ref.jpg',
+    unitPresence: 'featured' as const,
+  }
+
+  it('every exterior photo is a retouched _clean photo with a distinct view, side first', () => {
+    const pool = BRAND_PROFILE.referenceImages.exterior
+    expect(pool.map((r) => r.view)).toEqual(['side', 'rear34', 'rear'])
+    for (const r of pool) expect(r.url).toMatch(/_clean(_2)?\.png$/)
+  })
+
+  it('a rear / rear34 scene edits from that real photo, not the side-view character-ref', () => {
+    for (const view of ['rear', 'rear34'] as const) {
+      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: view })
+      expect(out.referenceImageUrl).toBe(pickExteriorByView(BRAND_PROFILE, view)!.url)
+      expect(out.prompt).toContain('Reference photo:')
+    }
+  })
+
+  it('a rear-view scene says the door stays closed and nobody stands in the doorway (no stepping-out animation)', () => {
+    for (const view of ['rear', 'rear34'] as const) {
+      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: view })
+      expect(out.prompt).toContain('The rear door stays closed and nobody stands in or at the doorway.')
+    }
+  })
+
+  it('a side / missing view keeps the shared character-ref', () => {
+    for (const unitView of ['side', undefined] as const) {
+      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView })
+      expect(out.referenceImageUrl).toBe(job.characterRefUrl)
+    }
+  })
+
+  it('an interior scene or a unit-free scene never uses an exterior view photo', () => {
+    const interior = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: 'rear', setting: 'interior' })
+    expect(interior.referenceImageUrl).not.toMatch(/truck_exterior/)
+    const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: 'rear', unitPresence: 'none' })
+    expect(none.referenceImageUrl).toBeUndefined()
+  })
+
+  it('rear photo descriptions never ask for a wordmark on the rear face', () => {
+    expect(pickExteriorByView(BRAND_PROFILE, 'rear')!.whatItShows).not.toMatch(/wordmark/i)
+    expect(pickExteriorByView(BRAND_PROFILE, 'rear34')!.whatItShows).toMatch(/rear face\s+carries no wordmark/)
+  })
+})
+
+describe('composeSceneVideoPrompt — no repeating background', () => {
+  it('always tells the video model not to scroll or loop the backdrop, and still fits the cap', () => {
+    const long = 'x '.repeat(1500)
+    for (const visualDescription of ['A woman walks to the truck', long]) {
+      const out = composeSceneVideoPrompt({ visualDescription, shotNotes: 'Slow push-in', unitPresence: 'featured' } as never)
+      expect(out).toContain('no replayed motion')
+      expect(out.length).toBeLessThanOrEqual(2450)
+    }
   })
 })

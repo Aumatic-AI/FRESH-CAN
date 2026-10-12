@@ -165,7 +165,13 @@ export interface CreativeBrief {
  * ignore without that correction language leaking into the factual
  * description itself.
  */
+/** Which face of the unit a reference photo / scene shows. */
+export type UnitView = 'side' | 'rear34' | 'rear'
+
 export interface BrandReferenceImage {
+  /** Which face of the unit this photo shows. Lets a scene pick the photo that
+   *  matches its framing (generateScript's `unit_view`) instead of a hash. */
+  view?: UnitView
   /** Publicly fetchable URL — the image adapter's edit-source input must be
    *  able to download it. */
   url: string
@@ -317,6 +323,9 @@ export interface BrandProfile {
     image: string
     video: string
   }
+  /** Second-word spellings the speech-to-text step is known to produce for
+   *  this brand's name (e.g. "khan" for "CAN"); only used to repair captions. */
+  asrMishearings?: readonly string[]
   appUi?: {
     /** Palette clause spliced into the scene-image prompt. */
     imageClause: string

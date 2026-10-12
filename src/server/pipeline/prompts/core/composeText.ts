@@ -689,7 +689,10 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '"appearance": string (specific and unambiguous enough that a different artist working from this text ' +
     'alone, with no image reference, would draw the same individual every time — always state apparent ' +
     'gender, ethnicity/skin tone, exact hair color/texture/style, and build or facial structure; never a generic phrase ' +
-    'like "kind-looking" or "friendly" that could describe many different people), "wardrobe": string (ONE ' +
+    'like "kind-looking" or "friendly" that could describe many different people. State skin tone in absolute ' +
+    'terms with the apparent heritage (e.g. "deep brown skin, West African heritage"), never "light" or ' +
+    '"medium" alone, and add face shape, facial hair or none, and hair length; real renders drew the same ' +
+    'person with a different skin tone and face each scene when this was vague), "wardrobe": string (ONE ' +
     'fixed outfit worn in every scene of the video, naming each garment with its exact color, e.g. "olive-green ' +
     'zip hoodie, dark-wash jeans, white sneakers" — never just "a hoodie", never a change of outfit), ' +
     '"distinguishing_details": string } ] (one entry per named or recurring person in the story — locked ' +
@@ -707,15 +710,13 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'shifting — specific enough to generate an image from. Ground it in this scene\'s own story beat and ' +
     'purpose from your planning above: what specifically happens, in what environment, and how it connects to ' +
     'the scene immediately before it — never a generic or purposeless shot),\n' +
-    '      "shot_notes": string (real cinematographic direction for this exact shot — angle, framing, depth of ' +
-    'field, and, whenever the shot moves, the movement\'s physical specifics: starting camera position, ' +
-    'direction, and approximate speed, and where it ends up. Be as physically concrete as an actual camera ' +
-    'operator\'s notes, never a vague mood word alone — e.g. "slow lateral tracking shot moving left to right ' +
-    'at a constant distance from the subject, settling on a medium close-up" or "static low-angle wide shot, ' +
-    'shallow depth of field, soft window light" — never just "cinematic camera movement" or "dynamic shot" ' +
-    'with no physical detail behind it. Only "" for a scene where a plain static shot is genuinely the ' +
-    'deliberate choice, never left empty by default. Choose composition and camera movement that serve THIS ' +
-    'scene\'s specific purpose in the story, not decoration for its own sake),\n' +
+    '      "shot_notes": string (cinematographic direction for this exact shot: angle, framing, distance and depth ' +
+    'of field. THE CAMERA NEVER MOVES — every shot is locked-off and static, so write "static", never a pan, ' +
+    'tilt, track, follow, dolly, zoom, push-in, orbit or handheld move: the video model scrolls, repeats and ' +
+    'morphs the background whenever the camera travels. Be concrete — e.g. "static low-angle wide shot, shallow ' +
+    'depth of field, soft window light" or "static medium close-up on the subject, background held steady" — ' +
+    'never just "cinematic" or "dynamic shot". Choose the angle and framing that serve THIS scene\'s specific ' +
+    'purpose in the story, not decoration for its own sake),\n' +
     '      "narration_intent": string (the SEMANTIC content this scene\'s narration should convey — describe ' +
     'the idea in plain terms, NEVER write it as a finished sentence in any one language, since this gets ' +
     'independently localized into actual EN or FR wording by a later step),\n' +
@@ -733,9 +734,17 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'Choose "background" or "featured" for every scene that shows a person arriving at, shopping in, or heading away ' +
     'from the unit with their groceries: the scene is drawn from the unit\'s reference image, and a scene marked ' +
     '"none" has no vehicle reference, so the image model invents its own vehicle. Choose "none" for scenes where the ' +
-    'unit plays no part in what is shown, such as a home kitchen or a phone screen),\n' +
+    'unit plays no part in what is shown, such as a home kitchen or a phone screen. Whenever the unit appears, ' +
+    'even as "background", it fills at least a third of the frame width so its wordmark reads cleanly — a small ' +
+    'or distant unit gets its wordmark garbled by the video model, so either make it large or choose "none"),\n' +
     '      "unit_presence_rationale": string (one sentence, honest and specific to this scene, never ' +
     'boilerplate — why you chose that unit_presence value; omit only if unit_presence is "none"),\n' +
+    '      "unit_view": "side" | "rear34" | "rear" (which face of the unit the shot frames, so the image is built ' +
+    'from the matching real photo; omit when unit_presence is "none" or the setting is not exterior. "rear" or ' +
+    '"rear34" for a scene where a customer stands BESIDE the unit scanning the QR panel or waiting to go in; the ' +
+    'door is always shown closed with nobody in or at the doorway; "side" for every other unit scene, ' +
+    'including a customer who has finished shopping and is leaving with groceries, or the unit parked or in the ' +
+    'background. The unit has no door anywhere except its rear),\n' +
     `      "app_on_screen": "none" | "background" | "featured" (is a person shown using the ${brand.name} app on a ` +
     'phone in this scene — searching for a unit, scanning the entry QR code; "featured" when the phone screen is ' +
     'a focal point, "background" when it is merely visible, "none" otherwise — an honest per-scene read, never a ' +
@@ -753,7 +762,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '    }\n' +
     '  ]\n' +
     '}\n' +
-    `Produce between 4 and 10 scenes whose target_duration_seconds are whole numbers (4-11 seconds each) that ` +
+    `Produce between 4 and 10 scenes whose target_duration_seconds are whole numbers (4-8 seconds each — use ` +
+    `enough scenes that none needs more than 8; long single shots loop and drift) that ` +
     `sum to EXACTLY ${opts.targetDurationSeconds} seconds — that is the requested runtime, not a guideline. ` +
     'Plan the story to fit it: a scene\'s narration is written to its own target_duration_seconds later, so ' +
     'make the total right here by giving fewer or shorter beats to a story that needs more room, never by ' +
@@ -772,8 +782,11 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     ' ' +
     SCENE_VISUAL_FIDELITY_RULE +
     ' Shoot it like a well-made short film, not a slideshow of ' +
-    'plain snapshots: vary shot types scene to scene (wide establishing shots, medium shots, close-ups, ' +
-    'over-the-shoulder, tracking shots) and give each one deliberate camera direction in shot_notes — this is ' +
+    'plain snapshots: vary shot types scene to scene (wide, medium, close-up, low-angle, over-the-shoulder) and ' +
+    'give each one deliberate framing in shot_notes — every shot is locked-off and static, never a pan or ' +
+    'track: the video model repeats and morphs a scrolling background, so the subject does the moving, not ' +
+    'the camera. Keep each action small enough for ONE locked frame (reaching, holding, looking, a few steps in ' +
+    'place) — never a long walk toward or away from the camera — this is ' +
     'a production-quality bar every scene should meet, never a directive on what mood or overall style to ' +
     'use, which stays entirely up to the scene idea. If the idea above is brief, expand it creatively into ' +
     'specific, vivid visual detail — concrete actions, objects, and environment — but every detail must still ' +

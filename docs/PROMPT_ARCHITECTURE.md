@@ -32,7 +32,7 @@ Tone/voice: `voiceGuidelines`/`bannedWords`. Business-model facts and their
 negatives: `journey`/`positiveVisualTruths`/`businessModelNegatives`. The
 physical unit: `unit.{identity,full,interior,wordmarkText}` (tiered — see
 Phase 1 below for why). Reference photos: `referenceImages.exterior[]`,
-each `{url, whatItShows, disregard[]}`.
+each `{view, url, whatItShows, disregard[]}` (`view`: side | rear34 | rear; video scenes select by the planner's `unit_view`).
 
 **Layer 1, intent interpretation** — `steps/shared/interpretIntent.ts` +
 `composeText.ts`'s `composeIntentSystemPrompt`. Turns the raw admin
@@ -185,7 +185,7 @@ QR panel). Previously this correction ("this photo also shows X, disregard
 it") was baked into the same prose string as the factual camera-angle
 description, making the two hard to tell apart. Now split: `whatItShows` is
 purely factual (what the camera captured), `disregard` is an explicit array
-of real-but-non-canonical elements to ignore. `standing` is ordered first in
+of real-but-non-canonical elements to ignore. the `side` photo is ordered first in
 `referenceImages.exterior` because `composeCharacterRefPrompt` always uses
 index 0 — it's the photo with the least competing real content in frame.
 
