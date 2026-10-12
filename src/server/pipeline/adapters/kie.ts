@@ -302,6 +302,11 @@ export class KieVideoGenerator implements VideoGenerator {
           // (avMerger.ts) — this call never carries the language-specific
           // narration, so no ambient/audio track is requested here either.
           generate_audio: false,
+          // Locks the camera (KIE docs: "fixed_lens ... Locks the camera when
+          // true"). The planner now writes only static shots, and a moving
+          // virtual camera is what made the video model scroll, repeat and
+          // morph backgrounds (jobs a64ab879, 369ff9de).
+          fixed_lens: true,
           duration: input.durationSeconds,
         },
       }),

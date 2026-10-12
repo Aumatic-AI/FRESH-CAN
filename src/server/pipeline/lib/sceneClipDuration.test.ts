@@ -1,42 +1,38 @@
 import { describe, it, expect } from 'vitest'
 import { pickClipDurationSeconds } from './sceneClipDuration'
 
+// request = the planned slot in whole seconds, clamped to 4..8s (no headroom:
+// narration residue is absorbed by the render step's <=1.25x slow-down).
 describe('pickClipDurationSeconds', () => {
-  it('requests the scene\'s own rounded target PLUS 1s headroom when the result still falls inside Seedance\'s 4-12s accepted range', () => {
-    expect(pickClipDurationSeconds(6000)).toBe(7)
-    expect(pickClipDurationSeconds(7000)).toBe(8)
-    expect(pickClipDurationSeconds(8000)).toBe(9)
+  it('requests exactly the planned slot, with no headroom (paid seconds == video seconds)', () => {
+    for (const s of [4, 5, 6, 7, 8]) expect(pickClipDurationSeconds(s * 1000)).toBe(s)
   })
 
-  it('rounds to the nearest whole second (then adds headroom) rather than truncating', () => {
-    expect(pickClipDurationSeconds(6400)).toBe(7) // round(6.4)=6, +1
-    expect(pickClipDurationSeconds(6600)).toBe(8) // round(6.6)=7, +1
+  it('rounds a fractional slot to the nearest whole second', () => {
+    expect(pickClipDurationSeconds(6400)).toBe(6)
+    expect(pickClipDurationSeconds(6600)).toBe(7)
   })
 
-  // Regression for a real 4-scene job (2026-09-24) where a target under the
-  // old '5'|'10' bucket's lower value got rounded down to 5 anyway — a
-  // target genuinely below Seedance's own 4s floor is the only case that
-  // still needs clamping up (headroom on top of an already-clamped-low
-  // target still can't push it below the floor either).
-  it('clamps a target below the 4s floor up to 4, even with headroom added', () => {
-    expect(pickClipDurationSeconds(2000)).toBe(4) // round=2, +1=3, clamped to 4
-    expect(pickClipDurationSeconds(3400)).toBe(4) // round=3, +1=4
+  it('clamps a tiny slot up to the 4s floor', () => {
+    expect(pickClipDurationSeconds(1000)).toBe(4)
+    expect(pickClipDurationSeconds(3400)).toBe(4)
   })
 
-  it('clamps a target above the 12s ceiling down to 12, even with headroom added', () => {
-    expect(pickClipDurationSeconds(15000)).toBe(12)
-    expect(pickClipDurationSeconds(20000)).toBe(12)
+  it('clamps a long slot down to the 8s ceiling (long takes loop their background)', () => {
+    expect(pickClipDurationSeconds(9000)).toBe(8)
+    expect(pickClipDurationSeconds(11000)).toBe(8)
+    expect(pickClipDurationSeconds(20000)).toBe(8)
   })
 
-  it('gives progressively less real headroom as the target approaches the 12s ceiling, never exceeding it', () => {
-    expect(pickClipDurationSeconds(11000)).toBe(12) // 11+1=12, full headroom, right at the ceiling
-    expect(pickClipDurationSeconds(12000)).toBe(12) // 12+1=13, clamped back to 12 — no real headroom left
+  it('never costs more than the plan: a 36s plan of 6,6,8,8,8 requests exactly 36 clip-seconds', () => {
+    const slots = [6000, 6000, 8000, 8000, 8000]
+    expect(slots.reduce((a, ms) => a + pickClipDurationSeconds(ms), 0)).toBe(36)
   })
 
-  it('never returns the old fixed 5/10 bucket for a target that is neither — regression for the visible frozen-frame hold this replaced (avMerger.ts\'s buildSceneDurationMatchCommand header)', () => {
-    expect(pickClipDurationSeconds(6000)).not.toBe(5)
-    expect(pickClipDurationSeconds(6000)).not.toBe(10)
-    expect(pickClipDurationSeconds(7000)).not.toBe(5)
-    expect(pickClipDurationSeconds(7000)).not.toBe(10)
+  it('the residual narration overshoot (<=8% + 0.3s trailing buffer) stays within the 1.25x render slow-down', () => {
+    for (const s of [4, 5, 6, 7, 8]) {
+      const worstAudio = s * 1.08 + 0.3
+      expect(worstAudio / pickClipDurationSeconds(s * 1000)).toBeLessThanOrEqual(1.25)
+    }
   })
 })

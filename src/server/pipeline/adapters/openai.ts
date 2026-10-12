@@ -5,6 +5,8 @@ import {
   type ScriptGenerationResult,
   type ImageValidator,
   type ImageValidationInput,
+  type ClipValidationInput,
+  type ClipValidator,
   type ImageValidationResult,
 } from './types'
 
@@ -114,11 +116,89 @@ const IMAGE_VALIDATION_SYSTEM_PROMPT =
   'Use "blocking" only for a defect that would make the image unusable in a professional ad; use "high" ' +
   'confidence only when the defect is unambiguous, not merely possible.'
 
+// Appended only when the unit can appear in the scene (ImageValidationInput.
+// unitPresence). The truck's front and side panels are solid steel; the model
+// keeps drawing a door/hatch there wherever a scene shows someone entering,
+// leaving or shopping. Same blocking/high bar as every other check.
+export const UNIT_STRUCTURE_VALIDATION_CLAUSE =
+  ' ALSO, when the white box truck with a maroon cargo container appears: report as blocking a door, hatch, ' +
+  'service window, vent or any other opening on the truck\'s LONG side panel (the long face carrying the ' +
+  '"Fresh CAN" wordmark) or on its front face, and a "Fresh CAN" wordmark appearing more than once on one ' +
+  'side panel. The truck\'s REAR face holds its only opening, a black-frame glass double door: that door, and ' +
+  'the rear face next to the long side in a three-quarter view, are normal and must NOT be reported. Use the ' +
+  'text "door or opening drawn on the truck\'s side or front".'
+
+// Always on (every scene): a readable third-party brand on packaging, clothing
+// or signage (real job a64ab879: a chip bag legibly reading "Doritos") breaks
+// the no-other-brands rule and raises a trademark question. Same blocking +
+// high-confidence bar, so only a clearly legible real brand rejects.
+export const THIRD_PARTY_BRAND_VALIDATION_CLAUSE =
+  ' ALSO report as blocking any clearly legible real third-party brand name or logo (on packaging, clothing, ' +
+  'vehicles or signs) other than Fresh-CAN; blurred, tiny or invented-looking text is not a defect. Use the ' +
+  'text "legible third-party brand name or logo".'
+
+// Only when the plan gives a headcount. Real job e31d325e scene 2: a second girl
+// in the same yellow top and denim shorts stood behind the daughter and the
+// generic "extra person not implied by the scene" check let it through because
+// nothing told the validator how many people to expect.
+export const HEADCOUNT_VALIDATION_CLAUSE =
+  ' ALSO report as blocking when more distinct people are visible than the plan\'s stated headcount, or when ' +
+  'the same person appears twice (a duplicate in identical clothing). Screens and photos do not count as ' +
+  'people. A reflection in glass, a window or a mirror that matches the real subject\'s own pose and position ' +
+  'is fine, but a reflection showing an extra person, or a figure facing a different way than the real ' +
+  'subject, counts as an extra person (the video model animates it into a second man). Silhouettes and clearly ' +
+  'visible people in the background count too. Use the text "more people than planned or a duplicated person".'
+
+// Appended when the plan says the shot frames the unit's rear: the glass
+// double door (and the small white QR panel beside it) is then expected, so a
+// rear 3/4 view is never rejected as a "door on the side".
+export const REAR_VIEW_VALIDATION_CLAUSE =
+  ' This scene is planned as a view of the truck\'s REAR: the rear glass double door, and the small white QR panel ' +
+  'beside it, are expected and must NOT be reported.'
+
+export function validExpectedPeople(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 8
+}
+
+export function buildImageValidationSystemPrompt(
+  unitPresence?: 'none' | 'background' | 'featured',
+  expectedPeople?: number,
+  unitView?: 'side' | 'rear34' | 'rear',
+): string {
+  let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE
+  if (unitPresence === 'background' || unitPresence === 'featured') {
+    prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
+    if (unitView === 'rear' || unitView === 'rear34') prompt += REAR_VIEW_VALIDATION_CLAUSE
+  }
+  if (validExpectedPeople(expectedPeople)) prompt += HEADCOUNT_VALIDATION_CLAUSE
+  return prompt
+}
+
 // Only a blocking, high-confidence issue rejects an image — anything
 // softer is kept for observability (ImageValidationResult.ignoredIssues)
 // but never spends another KIE generation.
 function isRejectingIssue(issue: { severity?: unknown; confidence?: unknown }): boolean {
   return issue.severity === 'blocking' && issue.confidence === 'high'
+}
+
+/** Turns the validator model's `issues` array into a result: only issues that
+ *  are blocking AND high-confidence reject (isRejectingIssue); the rest are
+ *  logged as ignored. A bare string carries no severity, so it never rejects. */
+export function parseValidationIssues(rawIssues: unknown[]): ImageValidationResult {
+  const issues: string[] = []
+  const ignoredIssues: string[] = []
+  for (const item of rawIssues) {
+    if (typeof item === 'string') {
+      ignoredIssues.push(item)
+      continue
+    }
+    if (!item || typeof item !== 'object') continue
+    const issue = item as { text?: unknown; severity?: unknown; confidence?: unknown }
+    if (typeof issue.text !== 'string' || !issue.text.trim()) continue
+    if (isRejectingIssue(issue)) issues.push(issue.text)
+    else ignoredIssues.push(`${issue.text} (${String(issue.severity)}, ${String(issue.confidence)} confidence)`)
+  }
+  return { pass: issues.length === 0, issues, ...(ignoredIssues.length ? { ignoredIssues } : {}) }
 }
 
 /**
@@ -138,7 +218,10 @@ export class OpenAIImageValidator implements ImageValidator {
   async validate(input: ImageValidationInput): Promise<ImageValidationResult> {
     const sceneText =
       'Scene description (the people, objects, and actions it names are expected, not defects): ' +
-      `${input.visualDescription}${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}`
+      `${input.visualDescription}${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` +
+      (validExpectedPeople(input.expectedPeople)
+        ? ` The plan shows exactly ${input.expectedPeople} ${input.expectedPeople === 1 ? 'person' : 'people'}.`
+        : '')
 
     const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -149,7 +232,7 @@ export class OpenAIImageValidator implements ImageValidator {
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: IMAGE_VALIDATION_SYSTEM_PROMPT },
+          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence, input.expectedPeople, input.unitView) },
           {
             role: 'user',
             content: [
@@ -183,22 +266,83 @@ export class OpenAIImageValidator implements ImageValidator {
       return { pass: true, issues: [] }
     }
 
-    const issues: string[] = []
-    const ignoredIssues: string[] = []
-    for (const item of rawIssues) {
-      // A bare string (old response shape) carries no severity/confidence,
-      // so it can't meet the rejection bar — logged, never acted on.
-      if (typeof item === 'string') {
-        ignoredIssues.push(item)
-        continue
-      }
-      if (!item || typeof item !== 'object') continue
-      const issue = item as { text?: unknown; severity?: unknown; confidence?: unknown }
-      if (typeof issue.text !== 'string' || !issue.text.trim()) continue
-      if (isRejectingIssue(issue)) issues.push(issue.text)
-      else ignoredIssues.push(`${issue.text} (${String(issue.severity)}, ${String(issue.confidence)} confidence)`)
-    }
+    return parseValidationIssues(rawIssues)
+  }
+}
 
-    return { pass: issues.length === 0, issues, ...(ignoredIssues.length ? { ignoredIssues } : {}) }
+// ─── Finished-clip check ─────────────────────────────────────────────────
+
+export const CLIP_ISSUE_PEOPLE = 'extra or duplicated person in the clip'
+export const CLIP_ISSUE_DOORWAY = 'someone crossing or emerging from the unit, or its door swinging open'
+export const CLIP_ISSUE_OBJECT = 'new object that is not in the source still'
+export const CLIP_ISSUE_MORPH = 'truck or wordmark morphing or garbled'
+
+export const CLIP_VALIDATION_SYSTEM_PROMPT =
+  'You are a strict visual QA reviewer for short AI-generated video clips. Image 1 is the SOURCE STILL the clip was ' +
+  'animated from. The remaining images are frames sampled from the finished clip, in time order (early, middle, ' +
+  'late). Compare each frame to the still and the scene description. Report ONLY defects the video model ' +
+  'introduced that the still does not have: ' +
+  `(1) more distinct people than the still shows, a person appearing, walking in, or a ghostly or blurred duplicate figure — use the text "${CLIP_ISSUE_PEOPLE}"; ` +
+  `(2) anyone stepping out of, emerging from, entering, or standing in the doorway of the white box truck with the maroon container, or its door swinging open or closed when the still shows it otherwise — use the text "${CLIP_ISSUE_DOORWAY}"; ` +
+  `(3) a new significant object (a cup, box, bag, tool) in someone's hands or the scene that the still and description do not show — use the text "${CLIP_ISSUE_OBJECT}"; ` +
+  `(4) the truck or its container clearly changing shape or size, or its "Fresh CAN" wordmark turning into clearly misspelled or garbled letters where it was legible in the still — use the text "${CLIP_ISSUE_MORPH}". ` +
+  'Ignore ordinary subject motion, camera-consistent changes of pose, expression and lighting, motion blur on a ' +
+  'moving limb, anything described in the scene description, and small or distant text that was never legible. ' +
+  'Respond with strictly valid JSON: { "issues": [ { "text": string, "severity": "blocking" | "minor", ' +
+  '"confidence": "high" | "medium" | "low" } ] } — an empty array when there are no defects. Use "blocking" only ' +
+  'for a defect that would make the clip unusable in a professional ad, and "high" confidence only when the defect ' +
+  'is unambiguous in the frames, not merely possible.'
+
+export class OpenAIClipValidator implements ClipValidator {
+  constructor(
+    private readonly apiKey: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+  ) {}
+
+  async validate(input: ClipValidationInput): Promise<ImageValidationResult> {
+    if (input.frames.length === 0) return { pass: true, issues: [] }
+    const sceneText =
+      `Scene description (what the clip is meant to show): ${input.visualDescription}` +
+      `${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` +
+      (validExpectedPeople(input.expectedPeople)
+        ? ` The plan shows exactly ${input.expectedPeople} ${input.expectedPeople === 1 ? 'person' : 'people'}.`
+        : '') +
+      (input.unitPresence === 'background' || input.unitPresence === 'featured'
+        ? ' The Fresh-CAN truck is part of this scene.'
+        : ' No truck is expected in this scene.')
+
+    const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: CLIP_VALIDATION_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: sceneText },
+              { type: 'image_url', image_url: { url: input.stillUrl } },
+              ...input.frames.map((f) => ({
+                type: 'image_url' as const,
+                image_url: { url: `data:image/jpeg;base64,${f.toString('base64')}` },
+              })),
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new ProviderCallError('openai', res.status, detail)
+    }
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    const content = data.choices?.[0]?.message?.content
+    const parsed = typeof content === 'string' ? safeJsonParse(content) : null
+    const rawIssues = parsed && typeof parsed === 'object' ? (parsed as { issues?: unknown }).issues : undefined
+    // Fail OPEN on an unparseable reply — a quality gate on a clip that is already paid for.
+    if (!Array.isArray(rawIssues)) return { pass: true, issues: [] }
+    return parseValidationIssues(rawIssues)
   }
 }

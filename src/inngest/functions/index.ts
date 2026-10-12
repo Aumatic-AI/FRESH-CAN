@@ -1,6 +1,7 @@
 import { blogGenerate, blogTrackProcess } from './blog'
 import { imageGenerate, imageTrackProcess } from './image'
 import { socialPublish } from './social'
+import { failJobOnCancelledRun } from './runCancelled'
 import { sweepStalledWork } from './sweeper'
 import { videoGenerate, videoApprove, videoTrackRender } from './video'
 
@@ -14,4 +15,5 @@ export const functions = [
   videoApprove,
   videoTrackRender,
   sweepStalledWork,
+  failJobOnCancelledRun,
 ]

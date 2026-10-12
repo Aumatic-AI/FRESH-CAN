@@ -5,6 +5,7 @@ import type {
   VideoGenerator,
   SceneClipScaler,
   ImageValidator,
+  ClipValidator,
   ImageValidationResult,
 } from '../../adapters/types'
 import { ProviderCallError } from '../../adapters/types'
@@ -17,6 +18,7 @@ import {
   upsertVisualAsset,
   getVisualAssets,
   getVideoScenes,
+  setVideoSceneSlot,
   isPipelineFailed,
   getLastFailedStepAttempt,
   getVideoPlanDraftData,
@@ -28,6 +30,9 @@ import {
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import { ASPECT_RATIO_RESOLUTIONS } from '../../lib/videoResolution'
 import { pickClipDurationSeconds } from '../../lib/sceneClipDuration'
+import { effectiveSlotMs, plannedSlotMs } from '../../lib/effectiveSceneDuration'
+import { parseMp4DurationSeconds } from '../../lib/mp4Duration'
+import { extractClipFrames } from '../../lib/clipFrames'
 import {
   BRAND_PROFILE,
   composeSceneImagePrompt,
@@ -246,14 +251,51 @@ const VALIDATION_RETRY_PREFIX = 'VALIDATION_RETRY:'
 // issue still present — those regenerations bought nothing. One targeted
 // retry, then accept.
 const MAX_VALIDATION_RETRIES = 1
+// A wrong headcount (extra person, duplicate, a reflected figure) is the defect
+// the video model turns into a second man mid-clip (jobs e31d325e, 369ff9de), and
+// the one a second attempt most often fixes, so it alone gets one more paid
+// regeneration. Every other validation issue keeps the single retry above.
+const MAX_PERSON_VALIDATION_RETRIES = 2
 
 // A collage still (several photos stacked in one frame) is rejected by a free,
-// local check (lib/panelDetect.ts) rather than the vision gate, and it gets
-// one extra retry: it is the most visible failure a scene can have (a whole
-// scene of the finished video, ~19% in real job 65b08e09), and a from-scratch
-// regeneration with the single-frame instruction is cheap next to shipping it.
+// local check (lib/panelDetect.ts) rather than the vision gate. It, the truck
+// door/vent check and the third-party-brand check all share the SAME single
+// validation retry (MAX_VALIDATION_RETRIES above): each retry is a paid KIE
+// image, and real jobs a64ab879/f63f3f5c showed extra retries mostly burning
+// credits. After the one retry the image is accepted as-is.
 export const COLLAGE_ISSUE = 'the image is a collage or stacked multi-panel layout instead of one single continuous photograph'
-const MAX_COLLAGE_RETRIES = 2
+
+/** The validator's unit-structure finding (adapters/openai.ts's
+ *  UNIT_STRUCTURE_VALIDATION_CLAUSE). Like a collage, an edit rarely removes a
+ *  drawn door, so the retry regenerates from scratch with a positive rule. */
+export function isUnitDoorIssue(issue: string): boolean {
+  return /\b(?:door|hatch|service window|vent|opening)\b.*\b(?:side|front|truck|unit|container)\b|\b(?:side|front)\b.*\b(?:door|hatch|opening)\b|wordmark.*more than once/i.test(issue)
+}
+
+/** The validator's third-party-brand finding (adapters/openai.ts). Like a
+ *  collage/door, a from-scratch regeneration with a clear instruction fixes it
+ *  better than an edit of the offending image. */
+export function isThirdPartyBrandIssue(issue: string): boolean {
+  return /third-party brand|brand name or logo/i.test(issue)
+}
+
+// Finished-clip check: REPORT ONLY. The vision check of a finished clip records
+// what it finds (console + the succeeded step's snapshot) but never regenerates
+// a clip — a regeneration is another paid KIE clip. Set CLIP_VALIDATION=off to
+// skip the check (no ffmpeg, no vision call).
+
+/** The validator's headcount finding (adapters/openai.ts's
+ *  HEADCOUNT_VALIDATION_CLAUSE): an edit rarely removes a duplicated person
+ *  cleanly, so the retry regenerates from scratch with an explicit count. */
+export function isExtraPersonIssue(issue: string): boolean {
+  return /more people than planned|duplicated person/i.test(issue)
+}
+
+/** How many validation-driven regenerations a failed image may use: 2 when every
+ *  reported issue is a headcount problem, else 1. */
+export function validationRetryBudget(issues: readonly string[]): number {
+  return issues.length > 0 && issues.every(isExtraPersonIssue) ? MAX_PERSON_VALIDATION_RETRIES : MAX_VALIDATION_RETRIES
+}
 
 export function isCollageIssue(issue: string): boolean {
   return /collage|split[- ]?screen|multi[- ]?panel|stacked (?:panel|image|photo)|grid of (?:photo|image)/i.test(issue)
@@ -278,11 +320,25 @@ interface RejectedImageSnapshot {
  *  regenerate the entire creative concept from scratch"). Reuses
  *  composeSceneImagePrompt's existing regenInstructions channel, so this is
  *  the ONLY new prompt content a validation-triggered retry adds. */
-export function buildCorrectionInstruction(issues: string[]): string {
+export function buildCorrectionInstruction(issues: string[], expectedPeople?: number): string {
   // An edit cannot undo a collage, so this regenerates from scratch with the
   // single-frame instruction instead of "preserve everything else".
   if (issues.some(isCollageIssue)) {
     return 'Render ONE single continuous photograph filling the whole frame — never a collage, split-screen, or stacked panels.'
+  }
+  if (issues.some(isExtraPersonIssue)) {
+    return typeof expectedPeople === 'number' && expectedPeople >= 1
+      ? `Exactly ${expectedPeople} ${expectedPeople === 1 ? 'person appears' : 'different people appear'} in the frame, each shown once; no duplicate, twin or extra person anywhere, including the background and any reflection in glass.`
+      : 'Each person appears exactly once; no duplicate, twin or extra person anywhere, including the background and any reflection in glass.'
+  }
+  if (issues.some(isThirdPartyBrandIssue)) {
+    return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
+  }
+  if (issues.some(isUnitDoorIssue)) {
+    return (
+      "The truck's front face and both side panels are one solid, unbroken maroon steel wall with no door, hatch, " +
+      'window or opening; its only opening is the glass double door on the rear face, which is not visible here.'
+    )
   }
   return (
     `Fix this specific issue: ${issues.join('; ')}. Preserve everything else — the established people, ` +
@@ -416,6 +472,7 @@ async function runSceneImageStep(
             regenInstructions,
             previousVisualState: previousScene ? extractVisualState(previousScene.narration_intent) : undefined,
             unitPresence: layer2.unit_presence,
+            unitView: layer2.setting === 'interior' ? undefined : layer2.unit_view,
             appPresence: layer2.app_on_screen,
             setting: layer2.setting,
             containsFood: layer2.contains_food,
@@ -478,6 +535,14 @@ async function runSceneImageStep(
       // runSceneVideoClipStep is even called) is what actually enforces
       // "before video generation" here; this function just has to avoid
       // marking the asset 'ready' until validation says so.
+      // The plan's headcount for this scene (generateScript.ts repairs it to be
+      // at least the cast listed as present); an invalid/missing value skips the
+      // headcount check entirely.
+      const rawPeople = extractVisualState(scene.narration_intent)?.people
+      const plannedPeople =
+        typeof rawPeople === 'number' && Number.isInteger(rawPeople) && rawPeople >= 1 && rawPeople <= 8
+          ? rawPeople
+          : undefined
       let validation: ImageValidationResult = { pass: true, issues: [] }
       // Free local collage check first; a collage skips the paid vision call.
       const collage = await isStackedPanelCollageUrl(permanentUrl)
@@ -488,6 +553,14 @@ async function runSceneImageStep(
             imageUrl: permanentUrl,
             visualDescription: scene.visual_description,
             shotNotes: scene.shot_notes,
+            // An interior scene shows no truck exterior, so the truck-structure
+            // check would only misfire (real job a64ab879 scene 2).
+            expectedPeople: plannedPeople,
+            unitView: extractSceneLayer2Fields(scene.narration_intent).unit_view,
+            unitPresence: (() => {
+              const l2 = extractSceneLayer2Fields(scene.narration_intent)
+              return l2.setting === 'interior' ? 'none' : l2.unit_presence
+            })(),
           })
         } catch (err) {
           // Fail OPEN — see OpenAIImageValidator's own header (adapters/
@@ -500,7 +573,7 @@ async function runSceneImageStep(
 
       // Only queried on a rejection — the common (passing) path costs no
       // extra DB round-trip.
-      const isCollageRejection = validation.issues.some(isCollageIssue)
+      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isExtraPersonIssue(i))
       const validationRetriesUsed = validation.pass
         ? 0
         : await countFailedStepAttemptsWithPrefix(
@@ -513,7 +586,7 @@ async function runSceneImageStep(
 
       if (
         !validation.pass &&
-        validationRetriesUsed < (isCollageRejection ? MAX_COLLAGE_RETRIES : MAX_VALIDATION_RETRIES) &&
+        validationRetriesUsed < validationRetryBudget(validation.issues) &&
         !hasExceededMaxAttempts(attemptNumber, MAX_ATTEMPTS.kie)
       ) {
         // Targeted regeneration (request #6) — reject this image and let
@@ -538,11 +611,11 @@ async function runSceneImageStep(
           attemptNumber,
           status: 'failed_retryable',
           provider: 'openai',
-          errorMessage: `${VALIDATION_RETRY_PREFIX}${buildCorrectionInstruction(validation.issues)}`,
+          errorMessage: `${VALIDATION_RETRY_PREFIX}${buildCorrectionInstruction(validation.issues, plannedPeople)}`,
           // No rejectedImageUrl for a collage: that would route the next attempt
           // into edit mode, which cannot fix it — omitting it makes the retry
           // regenerate from scratch with the correction instruction instead.
-          outputSnapshot: isCollageRejection
+          outputSnapshot: needsScratchRegen
             ? { issues: validation.issues }
             : { rejectedImageUrl: permanentUrl, issues: validation.issues },
         })
@@ -667,6 +740,7 @@ async function runSceneVideoClipStep(
   isFinalScene: boolean,
   aspectRatio: '9:16' | '1:1' | '16:9' = '9:16',
   plan: ScenePlanContext = {},
+  clipValidator?: ClipValidator,
 ): Promise<boolean> {
   const generation = pipeline.current_generation
   const alreadySucceeded = await hasSucceededStep(
@@ -782,6 +856,7 @@ async function runSceneVideoClipStep(
         const prompt = composeSceneVideoPrompt({
           visualDescription: scene.visual_description,
           shotNotes: scene.shot_notes,
+          peopleCount: extractVisualState(scene.narration_intent)?.people,
           isFinalScene,
           look: plan.look,
           unitPresence: layer2.unit_presence,
@@ -793,7 +868,7 @@ async function runSceneVideoClipStep(
         jobRef = await videoGenerator.submit({
           prompt,
           referenceImageUrl: sceneImageUrl,
-          durationSeconds: pickClipDurationSeconds(scene.target_duration_ms),
+          durationSeconds: pickClipDurationSeconds(plannedSlotMs(scene.narration_intent, scene.target_duration_ms)),
           aspectRatio,
         })
 
@@ -944,6 +1019,34 @@ async function runSceneVideoClipStep(
       throw new ProviderCallError('upload_post', null, detail)
     }
 
+    // Finished-clip vision check (see ClipValidator), REPORT ONLY: samples frames
+    // locally, compares them with the still and records any defects. It never
+    // regenerates the clip and fails open on any error (no ffmpeg, vision outage).
+    let clipCheckIssues: string[] | undefined
+    if (clipValidator && process.env.CLIP_VALIDATION !== 'off') {
+      try {
+        const frames = await extractClipFrames(scaleOutcome.fileBuffer)
+        if (frames.length > 0) {
+          const l2 = extractSceneLayer2Fields(scene.narration_intent)
+          const rawPeople = extractVisualState(scene.narration_intent)?.people
+          const people =
+            typeof rawPeople === 'number' && Number.isInteger(rawPeople) && rawPeople >= 1 && rawPeople <= 8 ? rawPeople : undefined
+          const verdict = await clipValidator.validate({
+            stillUrl: sceneImageUrl,
+            frames,
+            visualDescription: scene.visual_description,
+            shotNotes: scene.shot_notes,
+            expectedPeople: people,
+            unitPresence: l2.setting === 'interior' ? 'none' : l2.unit_presence,
+          })
+          clipCheckIssues = verdict.issues
+          if (!verdict.pass) console.log(`[${stepName}] clip check found: ${verdict.issues.join('; ')} (report only, clip kept)`)
+        }
+      } catch (checkErr) {
+        console.warn(`[${stepName}] clip check skipped (fail open):`, checkErr)
+      }
+    }
+
     const permanentUrl = await uploader.uploadBuffer(
       `${pipeline.job_id}/scene-${scene.scene_number}-clip.mp4`,
       scaleOutcome.fileBuffer,
@@ -961,6 +1064,25 @@ async function runSceneVideoClipStep(
       // the asset is ready and the raw clip is no longer needed.
       attemptNumber,
     })
+    // Narration is written later, per language, to each scene's time slot. Now
+    // that the real clip length is known, shrink the slot to it when the clip
+    // came back short, so no render-time stretch/hold is needed. Best-effort:
+    // the clip is already saved as ready, so a failure here must never fail it.
+    try {
+      const plannedMs = plannedSlotMs(scene.narration_intent, scene.target_duration_ms)
+      const realSeconds = parseMp4DurationSeconds(scaleOutcome.fileBuffer)
+      console.log(
+        `[${stepName}] clip length: requested ${pickClipDurationSeconds(plannedMs)}s, received ` +
+          `${realSeconds === null ? 'unknown' : realSeconds.toFixed(1) + 's'} (slot ${plannedMs / 1000}s)`,
+      )
+      const slotMs = effectiveSlotMs(plannedMs, realSeconds)
+      if (slotMs !== scene.target_duration_ms) {
+        await setVideoSceneSlot(client, scene, { targetDurationMs: slotMs, plannedDurationMs: plannedMs })
+        console.log(`[${stepName}] scene slot ${scene.target_duration_ms}ms -> ${slotMs}ms (planned ${plannedMs}ms) to match the real clip`)
+      }
+    } catch (slotErr) {
+      console.warn(`[${stepName}] could not update scene slot from the real clip length:`, slotErr)
+    }
     await recordStepAttempt(client, {
       contentPipelineId: pipeline.id,
       stepName,
@@ -968,7 +1090,7 @@ async function runSceneVideoClipStep(
       attemptNumber,
       status: 'succeeded',
       provider: 'kie',
-      outputSnapshot: { fileUrl: permanentUrl },
+      outputSnapshot: { fileUrl: permanentUrl, ...(clipCheckIssues?.length ? { clipCheckIssues } : {}) },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1117,6 +1239,9 @@ export async function runGenerateSceneVisual(
    *  own header (adapters/types.ts) and runSceneImageStep below. Omitted by
    *  every existing test, which keeps their exact prior behavior. */
   imageValidator?: ImageValidator,
+  /** Optional vision check of finished clips — see ClipValidator. Omitted by
+   *  every existing test, which keeps their exact prior behavior. */
+  clipValidator?: ClipValidator,
 ): Promise<{ ran: boolean }> {
   if (pipeline.status !== 'generating') return { ran: false }
 
@@ -1178,6 +1303,7 @@ export async function runGenerateSceneVisual(
           scene.scene_number === maxSceneNumber,
           aspectRatio,
           plan,
+          clipValidator,
         )
       }
     }

@@ -11,6 +11,10 @@ import { inngest } from '../client'
 import { createServiceClient, markPipelineFailed, markTrackFailed } from '../../server/pipeline/db'
 
 const STALLED_AFTER_MS = 45 * 60 * 1000
+// A render heartbeats (renderLanguageTrack's poll loop touches updated_at every
+// ~10s), so a 'rendering' track silent this long has no live worker behind it —
+// e.g. its Inngest run was cancelled at the function timeout.
+const RENDER_STALLED_AFTER_MS = 15 * 60 * 1000
 const client = createServiceClient()
 
 type Stalled = { id: string; status: string; current_step?: string | null; last_error: string | null; updated_at: string }
@@ -26,17 +30,34 @@ function describe(kind: 'track' | 'pipeline', r: Stalled): string {
 }
 
 export const sweepStalledWork = inngest.createFunction(
-  { id: 'sweep-stalled-work', triggers: [{ cron: '*/10 * * * *' }] },
+  {
+    id: 'sweep-stalled-work',
+    // One sweep at a time: a backlog of missed cron ticks (dev server asleep)
+    // would otherwise replay as dozens of concurrent runs.
+    concurrency: { limit: 1 },
+    triggers: [{ cron: '*/10 * * * *' }],
+  },
   async ({ step }) => {
     const cutoff = new Date(Date.now() - STALLED_AFTER_MS).toISOString()
 
+    const renderCutoff = new Date(Date.now() - RENDER_STALLED_AFTER_MS).toISOString()
+
     const tracks = await step.run('fail-stalled-tracks', async () => {
-      const { data, error } = await client
-        .from('content_language_tracks')
-        .select('id, status, current_step, last_error, updated_at')
-        .in('status', ['generating', 'rendering'])
-        .lt('updated_at', cutoff)
+      const [generating, rendering] = await Promise.all([
+        client
+          .from('content_language_tracks')
+          .select('id, status, current_step, last_error, updated_at')
+          .eq('status', 'generating')
+          .lt('updated_at', cutoff),
+        client
+          .from('content_language_tracks')
+          .select('id, status, current_step, last_error, updated_at')
+          .eq('status', 'rendering')
+          .lt('updated_at', renderCutoff),
+      ])
+      const error = generating.error ?? rendering.error
       if (error) throw error
+      const data = [...(generating.data ?? []), ...(rendering.data ?? [])]
       for (const t of (data ?? []) as Stalled[]) await markTrackFailed(client, t.id, describe('track', t))
       return (data ?? []).length
     })

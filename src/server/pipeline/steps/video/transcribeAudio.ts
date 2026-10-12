@@ -17,6 +17,7 @@ import {
 } from '../../db'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import { BRAND_PROFILE, composeLocalizeScriptSystemPrompt } from '../../prompts/index'
+import { brandForSpeech } from '../../lib/captionBrand'
 import { narrationWordCount } from '../../../../lib/videoNarrationBudget'
 
 const POLL_INTERVAL_MS = 3000
@@ -478,7 +479,7 @@ export async function runTranscribeAudio(
           try {
             if (!voiceId) throw new Error('no voice id available for the narration retry')
             const synthResult = await correction.voiceSynthesizer.synthesize({
-              text,
+              text: brandForSpeech(text, BRAND_PROFILE.name),
               voiceId,
               ...(speed !== undefined ? { speed } : {}),
             })

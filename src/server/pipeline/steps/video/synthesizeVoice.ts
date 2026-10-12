@@ -13,6 +13,7 @@ import {
 } from '../../db'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import { BRAND_PROFILE } from '../../prompts/index'
+import { brandForSpeech } from '../../lib/captionBrand'
 
 // ~150 words per minute — a reasonable average speaking pace. Used only to
 // ESTIMATE duration_ms; ElevenLabs' plain text-to-speech response doesn't
@@ -108,7 +109,7 @@ export async function runSynthesizeVoice(
         attemptNumber,
       })
 
-      const result = await voiceSynthesizer.synthesize({ text: existing.narration_text, voiceId })
+      const result = await voiceSynthesizer.synthesize({ text: brandForSpeech(existing.narration_text, BRAND_PROFILE.name), voiceId })
       const path = `${jobId}/${track.language}/scene-${scene.scene_number}-audio.mp3`
       const fileUrl = await uploader.uploadBuffer(path, result.audioBuffer, 'audio/mpeg')
       const durationMs = estimateDurationMs(existing.narration_text)

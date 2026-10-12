@@ -309,6 +309,21 @@ export async function isPipelineFailed(client: SupabaseClient, pipelineId: strin
 
 /** Same as isPipelineFailed, for a content_language_tracks row — the
  *  render/transcription poll loops are track-scoped, not pipeline-scoped. */
+/**
+ * Heartbeat for a track being rendered: refreshes updated_at (and records which
+ * render pass is running) so a render stuck on one pass is visible on the job
+ * page, and so the sweeper can tell a live render from a dead one. Only touches
+ * a track still 'rendering' — never clobbers 'failed' (cancel) or 'ready'.
+ */
+export async function touchRenderingTrack(client: SupabaseClient, trackId: string, pass: string): Promise<void> {
+  const { error } = await client
+    .from('content_language_tracks')
+    .update({ updated_at: new Date().toISOString(), current_step: `rendering_${pass.replace(/-/g, '_')}` })
+    .eq('id', trackId)
+    .eq('status', 'rendering')
+  if (error) throw error
+}
+
 export async function isTrackFailed(client: SupabaseClient, trackId: string): Promise<boolean> {
   const { data, error } = await client.from('content_language_tracks').select('status').eq('id', trackId).maybeSingle()
   if (error || !data) return false
@@ -909,6 +924,25 @@ export async function getVideoScenes(
   if (!data || data.length === 0) return []
   const latestGeneration = (data[0] as VideoSceneRow).generation
   return (data as VideoSceneRow[]).filter((s) => s.generation === latestGeneration)
+}
+
+/**
+ * Sets a scene's time slot (target_duration_ms) to what its real clip allows —
+ * see lib/effectiveSceneDuration.ts. The planned slot is saved inside
+ * narration_intent so a later, longer clip can restore it. A non-object
+ * narration_intent (legacy) just gets the new target, no saved original.
+ */
+export async function setVideoSceneSlot(
+  client: SupabaseClient,
+  scene: Pick<VideoSceneRow, 'id' | 'narration_intent'>,
+  input: { targetDurationMs: number; plannedDurationMs: number },
+): Promise<void> {
+  const update: Record<string, unknown> = { target_duration_ms: input.targetDurationMs }
+  if (scene.narration_intent && typeof scene.narration_intent === 'object' && !Array.isArray(scene.narration_intent)) {
+    update.narration_intent = { ...(scene.narration_intent as Record<string, unknown>), planned_duration_ms: input.plannedDurationMs }
+  }
+  const { error } = await client.from('video_scenes').update(update).eq('id', scene.id)
+  if (error) throw error
 }
 
 export interface VideoSceneAudioRow {

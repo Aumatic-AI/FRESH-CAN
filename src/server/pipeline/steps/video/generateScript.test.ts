@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitSceneDurations, fixUnitCrossingScenes, normalizeScriptOutput } from './generateScript'
+import { fitSceneDurations, fixUnitCrossingScenes, judgeDoorwayCrossings, lockSceneCamera, normalizeScriptOutput } from './generateScript'
 
 const VALID = {
   script: 'A short script.',
@@ -167,8 +167,20 @@ describe('fitSceneDurations', () => {
     expect(sum(fitSceneDurations(of(5, 6, 4, 5, 6), 36))).toBe(36)
   })
 
-  it('leaves an already-exact plan unchanged', () => {
-    expect(fitSceneDurations(of(7, 6, 8, 9, 6), 36).map((s) => s.target_duration_seconds)).toEqual([7, 6, 8, 9, 6])
+  it('leaves an already-exact plan unchanged when every scene is within the 7s preferred cap', () => {
+    expect(fitSceneDurations(of(6, 6, 6, 6, 6, 6), 36).map((s) => s.target_duration_seconds)).toEqual([6, 6, 6, 6, 6, 6])
+  })
+
+  it('pulls a scene above the 7s preferred cap back to 7 when the scene count allows it (long clips loop)', () => {
+    const fitted = fitSceneDurations(of(5, 6, 7, 9, 5, 4), 36)
+    expect(sum(fitted)).toBe(36)
+    for (const s of fitted) expect(s.target_duration_seconds).toBeLessThanOrEqual(7)
+  })
+
+  it('relaxes the cap, never the total, when too few scenes to fit 7s each', () => {
+    const fitted = fitSceneDurations(of(8, 8, 8, 8), 36)
+    expect(sum(fitted)).toBe(36)
+    for (const s of fitted) expect(s.target_duration_seconds).toBeLessThanOrEqual(9)
   })
 
   it('keeps every scene within the 4-11s bounds and whole seconds', () => {
@@ -182,7 +194,7 @@ describe('fitSceneDurations', () => {
   })
 
   it('preserves the relative pacing of the model plan', () => {
-    const fitted = fitSceneDurations(of(4, 12, 4), 24)
+    const fitted = fitSceneDurations(of(4, 6, 4), 14)
     expect(fitted[1].target_duration_seconds).toBeGreaterThan(fitted[0].target_duration_seconds)
   })
 
@@ -230,5 +242,142 @@ describe('fixUnitCrossingScenes', () => {
     expect(still[0]).toBe(scenes[0])
     const boom = await fixUnitCrossingScenes(scenes, { generate: async () => { throw new Error('x') } } as never)
     expect(boom[0]).toBe(scenes[0])
+  })
+})
+
+describe('visualDescribesUnitCrossing — wider phrasings', () => {
+  it('flags crossings the original patterns missed', async () => {
+    const { visualDescribesUnitCrossing: f } = await import('./localizeScript')
+    expect(f('Sarah leaves the unit with her bags')).toBe(true)
+    expect(f('A boy comes out of the truck holding apples')).toBe(true)
+    expect(f('They walk through the glass doors of the Fresh-CAN unit')).toBe(true)
+    expect(f('He hops aboard the truck')).toBe(true)
+  })
+  it('does not flag scenes beside or away from the unit', async () => {
+    const { visualDescribesUnitCrossing: f } = await import('./localizeScript')
+    expect(f('Sarah stands on the pavement beside the unit holding her bags')).toBe(false)
+    expect(f('The family walks home along the street, the unit parked behind them')).toBe(false)
+    expect(f('He heads out onto the street at dusk')).toBe(false)
+  })
+})
+
+describe('repairSceneLayer2 (job f63f3f5c: scene 2 had no unit and 0 people)', () => {
+  const base = {
+    scene_number: 2,
+    visual_description: "Close-up of friend1 scanning the QR code at the unit's door.",
+    narration_intent: 'x',
+    target_duration_seconds: 4,
+  }
+
+  it('upgrades an exterior "none" scene whose text puts the action at the unit', async () => {
+    const { repairSceneLayer2 } = await import('./generateScript')
+    const fixed = repairSceneLayer2({ ...base, unit_presence: 'none', setting: 'exterior' })
+    expect(fixed.unit_presence).toBe('background')
+    expect(fixed.unit_presence_rationale).toMatch(/corrected/)
+  })
+
+  it('leaves unrelated, interior, and already-present scenes alone', async () => {
+    const { repairSceneLayer2 } = await import('./generateScript')
+    const street = { ...base, visual_description: 'Two friends walk down a street.', unit_presence: 'none' as const, setting: 'unrelated' as const }
+    expect(repairSceneLayer2(street)).toBe(street)
+    const interior = { ...base, unit_presence: 'none' as const, setting: 'interior' as const }
+    expect(repairSceneLayer2(interior).unit_presence).toBe('none')
+    const featured = { ...base, unit_presence: 'featured' as const, setting: 'exterior' as const }
+    expect(repairSceneLayer2(featured)).toBe(featured)
+  })
+
+  it('never lets visual_state.people be fewer than the cast listed as present', async () => {
+    const { repairSceneLayer2 } = await import('./generateScript')
+    expect(repairSceneLayer2({ ...base, cast_present: ['friend1'], visual_state: { people: 0 } }).visual_state?.people).toBe(1)
+    expect(repairSceneLayer2({ ...base, cast_present: ['a', 'b'], visual_state: undefined }).visual_state?.people).toBe(2)
+    const ok = { ...base, cast_present: ['a', 'b'], visual_state: { people: 3 } }
+    expect(repairSceneLayer2(ok)).toBe(ok)
+    const noCast = { ...base, visual_state: { people: 0 } }
+    expect(repairSceneLayer2(noCast)).toBe(noCast)
+  })
+})
+
+describe('lockSceneCamera (job 369ff9de: "slow pan" and "tracking shot from behind" gave morphing backgrounds)', () => {
+  const base = { scene_number: 1, visual_description: 'v', narration_intent: 'n', target_duration_seconds: 6, cast_present: ['a'] }
+
+  it('rewrites camera-movement shot notes to a static shot that keeps the framing', () => {
+    const out = lockSceneCamera({ ...base, shot_notes: 'wide shot with a slow pan to follow the worker\'s movement' })
+    expect(out.shot_notes).toMatch(/^Static wide shot, locked-off camera with no camera movement/)
+    expect(lockSceneCamera({ ...base, shot_notes: 'wide tracking shot from behind' }).shot_notes).toMatch(/^Static wide shot/)
+    expect(lockSceneCamera({ ...base, shot_notes: 'slow push-in on a medium close-up' }).shot_notes).toMatch(/^Static medium close-up,/)
+  })
+
+  it('falls back to a plain static note when no framing word is present', () => {
+    expect(lockSceneCamera({ ...base, shot_notes: 'dolly through the aisle' }).shot_notes).toMatch(/^Static shot, locked-off/)
+  })
+
+  it('returns the same object when shot notes are already static, empty, or the scene has no people', () => {
+    const still = { ...base, shot_notes: 'static low-angle wide shot, soft window light' }
+    expect(lockSceneCamera(still)).toBe(still)
+    const none = { ...base }
+    expect(lockSceneCamera(none)).toBe(none)
+    const noPeople = { ...base, cast_present: [], shot_notes: 'slow pan across the street' }
+    expect(lockSceneCamera(noPeople)).toBe(noPeople)
+  })
+})
+
+describe('doorway crossings judged by meaning (job 369ff9de scene 4: "steps back outside", "reemerges")', () => {
+  const scene = (n: number, v: string, narr = 'x') => ({ scene_number: n, visual_description: v, narration_intent: narr, target_duration_seconds: 7 })
+  const seq = (...replies: unknown[]) => {
+    let i = 0
+    return { generate: async () => ({ parsed: replies[Math.min(i++, replies.length - 1)], raw: '' }) } as never
+  }
+
+  it('the keyword patterns alone miss both phrasings, which is why the judge exists', async () => {
+    const { visualDescribesUnitCrossing, narrationDescribesCrossing } = await import('./localizeScript')
+    expect(visualDescribesUnitCrossing('The worker steps back outside into the autumn morning, an apple in hand.')).toBe(false)
+    expect(narrationDescribesCrossing('As the worker reemerges under the crisp autumn sky, they feel at ease.')).toBe(true) // now caught
+  })
+
+  it('judgeDoorwayCrossings returns the scenes the model says cross, and fails open', async () => {
+    const got = await judgeDoorwayCrossings(
+      [scene(1, 'a'), scene(2, 'b')],
+      seq({ scenes: [{ scene_number: 1, crosses_doorway: false }, { scene_number: 2, crosses_doorway: true }] }),
+    )
+    expect([...got]).toEqual([2])
+    expect((await judgeDoorwayCrossings([scene(1, 'a')], { generate: async () => { throw new Error('x') } } as never)).size).toBe(0)
+    expect((await judgeDoorwayCrossings([scene(1, 'a')], seq({ nope: 1 }))).size).toBe(0)
+  })
+
+  it('rewrites a scene the judge flags even though no keyword matches, and fixes its narration and camera too', async () => {
+    const scenes = [
+      scene(1, 'They chop vegetables.'),
+      { ...scene(2, 'The worker steps back outside into the autumn morning, an apple in hand.', 'The worker comes back into the daylight with their apple and feels relieved'), cast_present: ['worker'] },
+    ]
+    const out = await fixUnitCrossingScenes(
+      scenes,
+      seq(
+        { scenes: [{ scene_number: 2, crosses_doorway: true }] },
+        {
+          scenes: [
+            {
+              scene_number: 2,
+              visual_description: 'The worker stands on the pavement beside the closed unit, an apple in hand, relieved.',
+              shot_notes: 'slow pan across the pavement',
+              narration_intent: 'The worker is already outside with their apple and feels relieved and satisfied',
+            },
+          ],
+        },
+      ),
+    )
+    expect(out[0]).toBe(scenes[0])
+    expect(out[1].visual_description).toContain('beside the closed unit')
+    expect(out[1].narration_intent).toContain('already outside')
+    expect(out[1].shot_notes).toMatch(/^Static shot, locked-off camera/) // the rewrite's "slow pan" is locked off
+  })
+
+  it('keeps the original narration when the rewrite still crosses or changes length too much', async () => {
+    const scenes = [scene(1, 'They exit the unit with bags.', 'They leave the unit with bags and feel happy today')]
+    const out = await fixUnitCrossingScenes(
+      scenes,
+      seq({ scenes: [] }, { scenes: [{ scene_number: 1, visual_description: 'They stand beside the unit.', shot_notes: '', narration_intent: 'They exit the unit' }] }),
+    )
+    expect(out[0].visual_description).toBe('They stand beside the unit.')
+    expect(out[0].narration_intent).toBe('They leave the unit with bags and feel happy today')
   })
 })

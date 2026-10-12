@@ -655,30 +655,13 @@ export function buildScaleCommand(
   return { files: [videoUrl], fullCommand, outputExtension: 'mp4' }
 }
 
-// Replaces tpad=stop_mode=clone (removed 2026-09-26) — freezing the clip's
-// last frame to cover a shortfall reads as a dead pause once the shortfall
-// is more than a fraction of a second, and a real job (the one that
-// motivated this) needed several SECONDS of hold per scene (its narration
-// ran 53-92% over its own scene budget — see transcribeAudio.ts's
-// OVERSHOOT_HARD_TOLERANCE for the upstream fix that now catches the worst
-// of that at the source). `-stream_loop -1` replays the clip's own real
-// footage from its start as many times as needed instead of freezing on a
-// still frame — continuous real motion the whole time — and needs no
-// foreknowledge of the input's actual duration (unlike a `setpts` speed
-// change, which would need to know that to compute a stretch factor):
-// looping past the target and trimming with the unchanged `-t` below just
-// degrades to "one loop, cut early" when the clip is already long enough,
-// exactly like today's trim-only behavior for that direction. Trade-off:
-// a clip whose motion doesn't loop seamlessly (e.g. a continuous camera
-// push-in) will show one visible restart-of-motion cut instead of a
-// freeze — a smaller, more honest artifact than several seconds of dead
-// air, and the upstream narration fix above means this should now rarely
-// need to cover more than a small fraction of a clip's own length anyway.
+// History: tpad freeze (pre 2026-09-26) -> -stream_loop -1 replay -> now (2026-10-12)
+// slow-motion stretch + zoomed hold. The replay was removed because it shows a
+// visible restart of motion/background; see the gapSeconds notes below.
 /**
  * Matches ONE scene's shared video clip to THIS language track's real
- * narration length — looping the clip's own footage from the start if it's
- * shorter than the audio (never freezing a still frame — see the note
- * above), trimming if it's longer. This is the render-time
+ * narration length — slowing/holding the clip if it's shorter than the audio
+ * (never looping its footage), trimming if it's longer. This is the render-time
  * reconciliation ARCHITECTURE.MD §4.2 always called for ("the render step
  * handles per-scene sync by holding the last frame... or trimming
  * trailing silence...") but that was never actually implemented — video
@@ -751,22 +734,14 @@ export function buildScaleCommand(
  * no new provider call) of how far the REAL clip falls short of
  * targetDurationSeconds; null when that probe couldn't determine it. Three
  * cases, deliberately narrow:
- *   - gapSeconds <= 0 (clip already covers the target): plain trim, no loop,
- *     no pad — unchanged from what a long-enough clip always got.
- *   - 0 < gapSeconds <= MAX_GAP_SECONDS (a small shortfall — the ordinary
- *     Seedance duration-adherence slop sceneClipDuration.ts's own header
- *     already documents, not a narration problem: that's corrected upstream
- *     in transcribeAudio.ts before this target is ever computed): holds the
- *     clip's own final frame for exactly gapSeconds via `tpad`, but ANIMATES
- *     it with a barely-noticeable continuous zoom (ZOOM_PEAK_FACTOR) instead
- *     of leaving it a bare freeze — `tpad` is still the only zero-probe-cost
- *     way to guarantee reaching target exactly, the difference from the old
- *     freeze-frame mechanism is that this hold is never left unanimated.
- *   - gapSeconds is null OR > MAX_GAP_SECONDS (unknown, or a shortfall too
- *     large to paper over with a subtle zoom without it reading as an
- *     obviously artificial stretch): falls back to the existing
- *     `-stream_loop -1` behavior, unchanged — never KIE/Seedance
- *     regeneration, never a longer zoom.
+ *   - gapSeconds <= 0 (clip already covers the target): plain trim, no pad.
+ *   - gapSeconds > 0: the clip is slowed by at most MAX_STRETCH_FACTOR (setpts)
+ *     to absorb the shortfall; anything left over is the clip's final frame
+ *     held via `tpad` with a barely-noticeable continuous zoom
+ *     (ZOOM_PEAK_FACTOR), so the hold is never a bare freeze. Never a loop.
+ *   - gapSeconds null (probe unavailable): pads the last frame by the full
+ *     target and trims with -t — a no-op for a long-enough clip, a held last
+ *     frame otherwise. Never a loop, never a zoom on unknown data.
  * `aspectRatio` only matters for the zoom case — it's the fixed pixel size
  * (ASPECT_RATIO_RESOLUTIONS) every clip was already downscaled to
  * (buildScaleCommand) before ever reaching this pass, needed so the
@@ -775,7 +750,10 @@ export function buildScaleCommand(
  * original — a literal target size is the only way to keep output
  * resolution constant across a per-frame-varying zoom).
  */
-const MAX_GAP_SECONDS = 1
+// Slow-motion budget: a short clip is slowed by at most this factor (1.25x
+// reads as natural, slightly calmer motion); any remaining shortfall is a
+// held, slowly zooming last frame. Never a loop.
+const MAX_STRETCH_FACTOR = 1.25
 // 104% peak — within the requested "approximately 100% -> 103-105%" range,
 // picked as a middle value rather than either edge.
 const ZOOM_PEAK_FACTOR = 1.04
@@ -791,27 +769,33 @@ export function buildSceneDurationMatchCommand(
   const fadeIn = Math.max(0, Math.min(transition.fadeInSeconds ?? 0, maxFade))
   const fadeOut = Math.max(0, Math.min(transition.fadeOutSeconds ?? 0, maxFade))
 
-  const isSmallGap = gapSeconds !== null && gapSeconds > 0 && gapSeconds <= MAX_GAP_SECONDS
-  const useLoopFallback = !isSmallGap && (gapSeconds === null || gapSeconds > MAX_GAP_SECONDS)
-
+  // Never loops: replaying a clip's own footage shows a visible restart of
+  // motion and background (real job a64ab879), so a short clip is covered by
+  // (1) a gentle slow-motion stretch (at most MAX_STRETCH_FACTOR x), then
+  // (2) a held last frame with a subtle continuous zoom for whatever is left.
   let vf = ''
-  if (isSmallGap) {
-    // zoomStart is exactly where the real clip's own last real frame ends
-    // (target - gapSeconds) — known precisely here because gapSeconds came
-    // from a real probe of this same clip, unlike the old stream_loop/tpad
-    // fallbacks, which were deliberately designed to never need that value.
-    // `clip(x,0,1)` is ffmpeg's own eval built-in (three-arg clamp); the
-    // ramp progress is 0 before the hold starts and 1 once it's fully
-    // eased in, linearly in between. Commas inside it are escaped (`\,`)
-    // since a bare `,` would otherwise read as the next filter in this -vf
-    // chain. `eval=frame` re-evaluates the (otherwise `t`-dependent) scale
-    // expression every frame — without it `scale` only evaluates once, at
-    // t=0, and the "zoom" would never move.
-    const zoomStart = (targetDurationSeconds - gapSeconds!).toFixed(2)
-    const rampProgress = `clip((t-${zoomStart})/${gapSeconds!.toFixed(2)}\\,0\\,1)`
-    const zoomFactor = `(1+${(ZOOM_PEAK_FACTOR - 1).toFixed(2)}*${rampProgress})`
-    const { width, height } = ASPECT_RATIO_RESOLUTIONS[aspectRatio]
-    vf = `tpad=stop_mode=clone:stop_duration=${gapSeconds!.toFixed(2)},scale=iw*${zoomFactor}:ih*${zoomFactor}:eval=frame,crop=${width}:${height}`
+  const gap = gapSeconds ?? NaN
+  if (gapSeconds === null) {
+    // Probe unavailable: the real shortfall is unknown, so only pad the last
+    // frame by the full target (a no-op when the clip is already long enough,
+    // since -t trims it) — still no loop and no zoom on unknown data.
+    vf = `tpad=stop_mode=clone:stop_duration=${targetDurationSeconds.toFixed(2)}`
+  } else if (gap > 0) {
+    const clipSeconds = Math.max(0.1, targetDurationSeconds - gap)
+    const stretchedSeconds = Math.min(targetDurationSeconds, clipSeconds * MAX_STRETCH_FACTOR)
+    const factor = stretchedSeconds / clipSeconds
+    const holdSeconds = targetDurationSeconds - stretchedSeconds
+    if (factor > 1.001) vf = `setpts=${factor.toFixed(4)}*PTS`
+    if (holdSeconds > 0.01) {
+      // zoomStart is exactly where the stretched clip's last real frame ends,
+      // known precisely because gapSeconds came from a real probe of this clip.
+      // Commas inside clip() are escaped (`\,`) so ffmpeg doesn't read them as
+      // the next filter; eval=frame re-evaluates the t-dependent scale per frame.
+      const rampProgress = `clip((t-${stretchedSeconds.toFixed(2)})/${holdSeconds.toFixed(2)}\\,0\\,1)`
+      const zoomFactor = `(1+${(ZOOM_PEAK_FACTOR - 1).toFixed(2)}*${rampProgress})`
+      const { width, height } = ASPECT_RATIO_RESOLUTIONS[aspectRatio]
+      vf += `${vf ? ',' : ''}tpad=stop_mode=clone:stop_duration=${holdSeconds.toFixed(2)},scale=iw*${zoomFactor}:ih*${zoomFactor}:eval=frame,crop=${width}:${height}`
+    }
   }
   if (fadeIn > 0) vf += `${vf ? ',' : ''}fade=t=in:st=0:d=${fadeIn.toFixed(2)}`
   if (fadeOut > 0) {
@@ -819,28 +803,11 @@ export function buildSceneDurationMatchCommand(
     vf += `${vf ? ',' : ''}fade=t=out:st=${fadeOutStart.toFixed(2)}:d=${fadeOut.toFixed(2)}`
   }
 
-  // -stream_loop -1 (an INPUT option, before -i, not a `-vf` filter) loops
-  // the clip indefinitely if it's shorter than -t's cutoff — real motion
-  // replaying from the clip's own start — instead of tpad's still-frame
-  // hold. Only used for the "unknown or large gap" fallback above; the
-  // small-gap zoom case above needs no looping at all (tpad alone reaches
-  // target exactly), and an already-long-enough clip (gapSeconds <= 0)
-  // needs neither. `-t` (unchanged either way) is still what actually caps
-  // the output at targetDurationSeconds, and still trims a clip that was
-  // already long enough down to size, exactly as before. -preset veryfast,
-  // not ultrafast (2026-09-23) — same reasoning as buildScaleCommand just
-  // above: this is a per-scene, per-language-track pass on one short clip,
-  // never the whole-render pass the ~9min queue ceiling was actually
-  // measured against.
-  // NOT YET CONFIRMED live: that upload-post.com's command-injection
-  // denylist (see buildCaptionBurnCommand's own header) allows `-stream_loop`
-  // or this zoom chain's function calls/escaped commas — no semicolon and no
-  // shell metacharacter either way, same shape as every other flag this file
-  // already sends successfully, but neither has itself been sent to that
-  // API yet.
-  const inputFlags = useLoopFallback ? '-stream_loop -1 ' : ''
+  // -t caps the output at targetDurationSeconds and trims a clip that was
+  // already long enough. -preset veryfast, not ultrafast (2026-09-23): this is
+  // a per-scene, per-language-track pass on one short clip.
   const vfArg = vf ? ` -vf "${vf}"` : ''
-  const fullCommand = `ffmpeg -y ${inputFlags}-i {input}${vfArg} -t ${targetDurationSeconds.toFixed(2)} -c:v libx264 -preset veryfast -crf ${SCENE_PASS_CRF} -an {output}`
+  const fullCommand = `ffmpeg -y -i {input}${vfArg} -t ${targetDurationSeconds.toFixed(2)} -c:v libx264 -preset veryfast -crf ${SCENE_PASS_CRF} -an {output}`
   return { files: [clipUrl], fullCommand, outputExtension: 'mp4' }
 }
 

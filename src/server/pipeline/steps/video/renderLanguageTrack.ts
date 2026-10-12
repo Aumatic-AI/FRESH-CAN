@@ -4,8 +4,11 @@ import { ProviderCallError } from '../../adapters/types'
 import { buildCaptionAssFile, SCENE_TRANSITION_FADE_SECONDS } from '../../adapters/avMerger'
 import type { VideoStorageUploader } from '../../adapters/storage'
 import { parseMp4DurationSeconds } from '../../lib/mp4Duration'
+import { fixBrandNameInWords } from '../../lib/captionBrand'
+import { BRAND_PROFILE } from '../../prompts/index'
 import {
   claimTrack,
+  touchRenderingTrack,
   hasSucceededStep,
   recordStepAttempt,
   recordTrackRetryableFailure,
@@ -137,6 +140,8 @@ async function pollUntilDone(
       console.log(`[render:${label}] cancelled at ${elapsedSec()}s — stopping poll early`)
       return { cancelled: true, elapsedMs: elapsed() }
     }
+    // Heartbeat + which pass this is (best-effort: never fail a render over it).
+    await touchRenderingTrack(client, trackId, label).catch(() => undefined)
     pollCount += 1
     let result: Awaited<ReturnType<AVMerger['poll']>>
     try {
@@ -486,7 +491,7 @@ export async function runRenderLanguageTrack(
       cumulativeMs += input.audioDurationSeconds * 1000
       sceneBoundariesMs.push(cumulativeMs)
     }
-    const assContent = buildCaptionAssFile(captionRow?.timing_data, aspectRatio, sceneBoundariesMs)
+    const assContent = buildCaptionAssFile(fixBrandNameInWords(captionRow?.timing_data, BRAND_PROFILE.name, BRAND_PROFILE.asrMishearings), aspectRatio, sceneBoundariesMs)
     let finalBuffer = muxOutcome.fileBuffer
     // captionElapsedMs stays null (not 0) when there were no cues, so the
     // success snapshot below can tell "no caption pass ran" apart from "the

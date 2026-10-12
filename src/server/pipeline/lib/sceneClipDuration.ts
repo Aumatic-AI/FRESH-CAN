@@ -1,50 +1,22 @@
-// Requests the scene's own planned budget, clamped to Seedance 1.5 Pro's
-// documented 4-12s accepted range (kie.ts's KieVideoGenerator header) —
-// replaces the old Kling-2.6-era '5'|'10' bucketing (2026-09-24). That
-// bucketing was kept as-is through the 2026-09-21 Seedance swap deliberately
-// (see git history) even though Seedance would already accept an arbitrary
-// duration, specifically so the model swap didn't also require touching
-// this logic. Confirmed live (2026-09-24) that keeping it was the wrong
-// call once composeLocalizeScriptSystemPrompt's own word-budget fix (same
-// day) started landing real per-language narration much closer to each
-// scene's real target_duration_seconds: a clip still bucketed to a fixed
-// 5s/10s regardless of a 6s/7s/8s target now regularly came back shorter
-// than the narration it needed to cover, and buildSceneDurationMatchCommand
-// (avMerger.ts) closes that gap by CLONING the clip's last frame to hold
-// through the shortfall — a visible freeze right at the scene cut. A real
-// 4-scene job showed this exactly: scene 1 (6s target, bucketed to 5s) froze
-// for ~0.9s before cutting; scene 3 (8s target, bucketed to 10s, so already
-// longer than needed) showed no freeze at all, just a clean trim. Requesting
-// close to the real target directly shrinks that gap for both directions —
-// fewer/shorter freezes when the clip would have been too short, and less
-// wasted trimmed footage when it would have been too long. Rounds to the
-// nearest whole second (matching the previous integer-bucket behavior) since
-// KIE.ai's own docs (docs.kie.ai/market/bytedance/seedance-1-5-pro) don't
-// confirm fractional-second durations are accepted. Only ever used to build
-// the REQUEST sent to generateSceneVisual.ts's video-generation call —
-// nothing downstream trusts this as the clip's real, actual generated
-// length; buildSceneDurationMatchCommand (avMerger.ts) reconciles every
-// clip to each language's own real, AssemblyAI-measured narration length
-// regardless of what was requested here, exactly as it already did for
-// Seedance's own duration drift (see that function's own header).
+// Requests exactly the scene's planned slot (whole seconds), clamped to 4..8s.
+//
+// Cost and quality both scale with requested seconds, and a clip longer than
+// the video needs is paid for and then trimmed. Narration is already corrected
+// to within ~8% of its slot (localize's MAX_FILL 1.05, transcribeAudio's
+// OVERSHOOT_HARD_TOLERANCE 1.08), and the render step absorbs that residue for
+// free with a <=1.25x slow-down (avMerger.ts buildSceneDurationMatchCommand), so
+// no headroom is bought here. A clip Seedance returns short is handled by
+// generateSceneVisual (slot clamped to the real clip, lib/effectiveSceneDuration).
+// Capped at 8s because long takes repeat their background (real job a64ab879's
+// 11s clip) and the planner targets scenes of <=7s (8s only when the scene
+// count forces it).
+//
+// History: 5/10s buckets -> planned slot -> slot + 1s (2026-09-26) -> slot*1.15+1
+// (2026-10-12, over-provisioned: ~28% more paid video than the plan) -> now.
 const MIN_CLIP_SECONDS = 4
-const MAX_CLIP_SECONDS = 12
-
-// +1s headroom (2026-09-26) — the other half (alongside transcribeAudio.ts's
-// tightened OVERSHOOT_HARD_TOLERANCE/OVERSHOOT_SOFT_TOLERANCE) of making
-// renderLanguageTrack.ts's visual fallback (avMerger.ts's small-gap zoom /
-// large-gap loop) rarely necessary instead of routinely relied on: with
-// narration now landing much closer to its own target, requesting a touch
-// MORE clip than that target directly biases toward "actual video duration
-// >= actual audio duration" holding on its own, so the render step's own
-// probe (renderLanguageTrack.ts's probeClipGapSeconds) usually finds a plain
-// trim is all that's needed. Applied BEFORE the existing 4-12s clamp, so a
-// target already near the 12s ceiling gets progressively less real headroom
-// (a 12s target still only ever requests 12s) rather than ever exceeding
-// Seedance's accepted range.
-const HEADROOM_SECONDS = 1
+const MAX_CLIP_SECONDS = 8
 
 export function pickClipDurationSeconds(targetDurationMs: number): number {
-  const targetSeconds = Math.round(targetDurationMs / 1000)
-  return Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, targetSeconds + HEADROOM_SECONDS))
+  const slotSeconds = Math.round(targetDurationMs / 1000)
+  return Math.min(MAX_CLIP_SECONDS, Math.max(MIN_CLIP_SECONDS, slotSeconds))
 }

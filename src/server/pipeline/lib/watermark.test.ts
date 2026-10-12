@@ -20,7 +20,7 @@ async function makeSolidBase(width: number, height: number): Promise<Buffer> {
 // exercises the real decode/composite/encode path against real photo data
 // rather than a degenerate case that happens to be easy to generate.
 function loadRealSamplePhoto(): Buffer {
-  return readFileSync(path.join(process.cwd(), 'assets', 'fresh-can', 'truck_exterior_back.png'))
+  return readFileSync(path.join(process.cwd(), 'assets', 'fresh-can', 'truck_exterior_rear_clean_2.png'))
 }
 
 describe('compositeLogoWatermark', () => {

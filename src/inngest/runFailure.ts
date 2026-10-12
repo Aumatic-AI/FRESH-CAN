@@ -25,8 +25,17 @@ export async function failJobOnRunFailure({
   const message = raw.startsWith(CREDENTIAL_UNAVAILABLE_PREFIX)
     ? raw
     : `Run stopped (${event.data.function_id ?? 'pipeline function'}): ${raw}`
-  const original = (event.data.event?.data ?? {}) as { pipelineId?: string; trackId?: string }
+  await failInFlightRows((event.data.event?.data ?? {}) as OriginalEventData, message)
+}
+
+type OriginalEventData = { pipelineId?: string; trackId?: string }
+
+// Fails the track (or pipeline) the original event pointed at, only if it is
+// still in flight — a user cancel or an earlier terminal outcome already wrote
+// its own, more specific, last_error.
+async function failInFlightRows(original: OriginalEventData, message: string): Promise<void> {
   const client = createServiceClient()
+
 
   // Only fail rows still in flight — a user cancel or an earlier terminal
   // outcome already wrote its own, more specific, last_error.
@@ -41,4 +50,25 @@ export async function failJobOnRunFailure({
       await markPipelineFailed(client, original.pipelineId, message)
     }
   }
+}
+
+/**
+ * Handler for Inngest's `inngest/function.cancelled` event. A run that hits its
+ * function-level `timeouts.finish` is CANCELLED, not failed, so onFailure never
+ * fires for it (real job 369ff9de: the render run was cancelled at the 30-minute
+ * cap and its track sat at 'rendering' with no error). This fails the in-flight
+ * row with the reason; a user cancel already marked its row failed first, so
+ * that case is left untouched.
+ */
+export async function failJobOnRunCancelled({
+  event,
+}: {
+  event: { data: { function_id?: string; event?: { data?: unknown }; events?: { data?: unknown }[] } }
+}): Promise<void> {
+  const original = (event.data.event?.data ?? event.data.events?.[0]?.data ?? {}) as OriginalEventData
+  if (!original.trackId && !original.pipelineId) return
+  await failInFlightRows(
+    original,
+    `Run cancelled (${event.data.function_id ?? 'pipeline function'}): it hit its time limit or was cancelled before finishing. Use Retry to resume.`,
+  )
 }

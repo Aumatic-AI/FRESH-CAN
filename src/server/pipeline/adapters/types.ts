@@ -110,6 +110,18 @@ export interface ImageValidationInput {
   imageUrl: string
   visualDescription: string
   shotNotes?: string | null
+  /** The scene's unit_presence. When the Fresh-CAN unit can appear
+   *  ('background' | 'featured'), the validator also checks its structure
+   *  (no door/hatch/opening on the front or side). Omitted or 'none' = the
+   *  original checks only. */
+  unitPresence?: 'none' | 'background' | 'featured'
+  /** How many people the plan says this scene shows (visual_state.people). When
+   *  a positive integer, the validator also rejects more distinct people than
+   *  that, or the same person twice. Omitted/0 = no headcount check. */
+  expectedPeople?: number
+  /** The scene's planned unit_view. 'rear'/'rear34' tell the validator the rear
+   *  door is expected in frame. */
+  unitView?: 'side' | 'rear34' | 'rear'
 }
 
 export interface ImageValidationResult {
@@ -140,6 +152,31 @@ export interface ImageValidationResult {
  */
 export interface ImageValidator {
   validate(input: ImageValidationInput): Promise<ImageValidationResult>
+}
+
+/**
+ * Vision check of a FINISHED scene clip (frames sampled locally, see
+ * lib/clipFrames.ts) against the still it was animated from. The video model
+ * invents content mid-clip that the still validator can never see — a second
+ * person, a figure emerging from the unit, a door swinging, a new object in
+ * hand, a morphing truck or garbled wordmark (jobs a64ab879, 369ff9de). Same
+ * result shape and fail-open contract as ImageValidator.
+ */
+export interface ClipValidationInput {
+  /** The scene still the clip was animated from. */
+  stillUrl: string
+  /** JPEG frames sampled from the clip, in time order (early, middle, late). */
+  frames: Buffer[]
+  visualDescription: string
+  shotNotes?: string | null
+  /** The plan's headcount for the scene (positive integer), when known. */
+  expectedPeople?: number
+  /** Whether the Fresh-CAN unit is part of the scene ('none' = no unit checks). */
+  unitPresence?: 'none' | 'background' | 'featured'
+}
+
+export interface ClipValidator {
+  validate(input: ClipValidationInput): Promise<ImageValidationResult>
 }
 
 // ─── Video-only adapters (M0 of the video migration) ───────────────────────

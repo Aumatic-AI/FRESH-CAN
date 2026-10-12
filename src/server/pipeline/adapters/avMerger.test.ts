@@ -443,25 +443,18 @@ describe('buildSceneDurationMatchCommand', () => {
     expect(fullCommand).toContain('-an')
   })
 
-  it('loops the input indefinitely and hard-trims to the full target duration — regression for a real caption/audio desync caused by assuming the input clip\'s real length instead', () => {
-    // Old behavior (tpad, removed 2026-09-26 in favor of -stream_loop -1 —
-    // see this function's own header) computed stop_duration as a SHORTFALL
-    // against an assumed input length (pickClipDurationSeconds's '5'/'10'
-    // bucket) — correct only when that assumption held (true for Kling/
-    // Hailuo, NOT true for Seedance 1.5 Pro, confirmed live 2026-09-21).
-    // `-stream_loop -1` + `-t` needs no such assumption either: the input
-    // loops as many times as needed and -t always trims the result to
-    // exactly the target, regardless of the real input length.
-    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 8)
-    expect(fullCommand).toContain('-stream_loop -1')
-    expect(fullCommand).not.toContain('tpad')
-    expect(fullCommand).toContain('-t 8.00')
-  })
-
-  it('pads by looping the full target even for a small target — still correct whether the real input clip is longer or shorter than it', () => {
-    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 6)
-    expect(fullCommand).toContain('-stream_loop -1')
-    expect(fullCommand).toContain('-t 6.00')
+  it('never loops: with no probe it pads the last frame by the full target and hard-trims to it — correct whether the real clip is longer or shorter', () => {
+    // History: tpad (to 2026-09-26) -> -stream_loop -1 replay -> now never a
+    // loop. Padding by the FULL target needs no assumption about the real clip
+    // length (Seedance does not render the requested duration reliably) and -t
+    // always trims the result to exactly the target.
+    for (const target of [8, 6]) {
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', target)
+      expect(fullCommand).not.toContain('-stream_loop')
+      expect(fullCommand).toContain(`tpad=stop_mode=clone:stop_duration=${target.toFixed(2)}`)
+      expect(fullCommand).not.toContain('scale=')
+      expect(fullCommand).toContain(`-t ${target.toFixed(2)}`)
+    }
   })
 
   it('uses the bare {input} placeholder, not {input0}', () => {
@@ -480,15 +473,14 @@ describe('buildSceneDurationMatchCommand', () => {
     expect(fullCommand).not.toContain('fade=')
   })
 
-  it('adds a fade-in in its own -vf, alongside -stream_loop -1, when fadeInSeconds is given — no new pass, no semicolon', () => {
-    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 8, { fadeInSeconds: 0.25 })
-    expect(fullCommand).toContain('-stream_loop -1')
+  it('adds a fade-in in its own -vf when fadeInSeconds is given (clip long enough, so no pad) — no new pass, no semicolon', () => {
+    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 8, { fadeInSeconds: 0.25 }, -1)
     expect(fullCommand).toContain('-vf "fade=t=in:st=0:d=0.25"')
     expect(fullCommand).not.toContain(';')
   })
 
   it('chains a fade-out timed against the END of the target duration when fadeOutSeconds is given', () => {
-    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 8, { fadeOutSeconds: 0.25 })
+    const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 8, { fadeOutSeconds: 0.25 }, -1)
     expect(fullCommand).toContain('fade=t=out:st=7.75:d=0.25')
     expect(fullCommand).not.toContain(';')
   })
@@ -516,13 +508,38 @@ describe('buildSceneDurationMatchCommand', () => {
   })
 
   describe('gapSeconds (small visual-duration shortfall, 2026-09-26)', () => {
-    it('7.0s target + 6.8s real visual (0.2s gap) — holds the final frame with a subtle zoom, never loops or freezes bare', () => {
+    it('7.0s target + 6.8s real visual (0.2s gap) — absorbed by a slight slow-down, no hold needed, never loops', () => {
       const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 0.2)
       expect(fullCommand).not.toContain('-stream_loop')
-      expect(fullCommand).toContain('tpad=stop_mode=clone:stop_duration=0.20')
-      expect(fullCommand).toContain('eval=frame') // the zoom actually animates over time
-      expect(fullCommand).toContain('crop=720:1280') // holds the fixed 9:16 frame size throughout
+      expect(fullCommand).toContain('setpts=1.0294*PTS')
+      expect(fullCommand).not.toContain('tpad')
       expect(fullCommand).toContain('-t 7.00')
+    })
+
+    it('7.0s target + 4.0s real visual (3s gap) — slowed 1.25x then the rest held with a zoom, never loops', () => {
+      const { fullCommand, files } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 3)
+      expect(fullCommand).not.toContain('-stream_loop')
+      expect(fullCommand).toContain('setpts=1.2500*PTS')
+      expect(fullCommand).toContain('tpad=stop_mode=clone:stop_duration=2.00')
+      expect(fullCommand).toContain('eval=frame')
+      expect(fullCommand).toContain('crop=720:1280')
+      expect(fullCommand).not.toContain(';')
+      expect(fullCommand).toContain('-t 7.00')
+      expect(files).toEqual(['https://example.com/clip.mp4'])
+    })
+
+    it('a shortfall the 1.25x stretch can fully cover needs no hold or zoom', () => {
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 1.4)
+      expect(fullCommand).toContain('setpts=1.2500*PTS')
+      expect(fullCommand).not.toContain('tpad')
+      expect(fullCommand).not.toContain('scale=')
+    })
+
+    it('a shortfall just beyond the stretch holds + zooms only the remainder (2s gap: 5s clip -> 6.25s, 0.75s hold)', () => {
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 2)
+      expect(fullCommand).toContain('setpts=1.2500*PTS')
+      expect(fullCommand).toContain('tpad=stop_mode=clone:stop_duration=0.75')
+      expect(fullCommand).toContain('eval=frame')
     })
 
     it('7.0s target + 7.5s real visual (already long enough, gapSeconds <= 0) — plain trim, no loop, no pad, no zoom', () => {
@@ -533,35 +550,18 @@ describe('buildSceneDurationMatchCommand', () => {
       expect(fullCommand).toContain('-t 7.00')
     })
 
-    it('7.0s target + 5.0s real visual (2s gap, over the 1s max) — falls back to the existing loop behavior rather than a long/obvious zoom, and touches no KIE/Seedance call of any kind', () => {
-      const { fullCommand, files } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 2)
-      expect(fullCommand).toContain('-stream_loop -1')
-      expect(fullCommand).not.toContain('scale=')
-      expect(fullCommand).not.toContain('crop=')
-      expect(fullCommand).toContain('-t 7.00')
-      // The ONLY file this command references is the already-generated clip
-      // URL it was given — no KIE endpoint, no new asset, nothing else.
-      expect(files).toEqual(['https://example.com/clip.mp4'])
-    })
-
-    it('null gapSeconds (probe unavailable) behaves exactly like the large-gap case — safe default, never zooms on unknown data', () => {
-      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7)
-      expect(fullCommand).toContain('-stream_loop -1')
-      expect(fullCommand).not.toContain('scale=')
-    })
-
     it('caps the zoom at approximately 104% (within the requested 103-105% range)', () => {
-      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 0.5)
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 3)
       expect(fullCommand).toContain('(1+0.04*')
     })
 
     it('still chains fade-in/out on top of the zoom when both are requested — transitions untouched by this change', () => {
-      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, { fadeInSeconds: 0.25 }, 0.2)
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, { fadeInSeconds: 0.25 }, 3)
       expect(fullCommand).toContain('crop=720:1280,fade=t=in:st=0:d=0.25')
     })
 
     it('uses the requested aspect ratio\'s own fixed resolution for the crop, not always 9:16', () => {
-      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 0.2, '16:9')
+      const { fullCommand } = buildSceneDurationMatchCommand('https://example.com/clip.mp4', 7, {}, 3, '16:9')
       expect(fullCommand).toContain('crop=1280:720')
     })
   })
@@ -690,7 +690,7 @@ describe('UploadPostAVMerger', () => {
     expect(capturedHeaders.Authorization).toBe('Apikey secret-key')
     const body = JSON.parse(capturedBody!)
     expect(body.files).toEqual(['https://example.com/clip.mp4'])
-    expect(body.full_command).toContain('-stream_loop -1')
+    expect(body.full_command).not.toContain('-stream_loop')
     expect(body.full_command).toContain('-t 8.00')
   })
 

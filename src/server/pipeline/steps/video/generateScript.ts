@@ -11,7 +11,7 @@ import {
   getVideoScenes,
   type PipelineRow,
 } from '../../db'
-import { visualDescribesUnitCrossing } from './localizeScript'
+import { visualDescribesUnitCrossing, narrationDescribesCrossing } from './localizeScript'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import {
   BRAND_PROFILE,
@@ -82,6 +82,10 @@ export interface ScriptSceneOutput {
    *  auditing against that checklist). Optional/lenient like every other
    *  Layer 2 field here — a missing rationale never fails the scene. */
   unit_presence_rationale?: string
+  /** Which face of the unit the scene frames; picks the matching reference
+   *  photo. LLM-decided; only meaningful when unit_presence != 'none' and the
+   *  setting is exterior. Undefined falls back to the shared side reference. */
+  unit_view?: 'side' | 'rear34' | 'rear'
   /** Is a person shown using the brand's app on a phone (finding a unit,
    *  scanning the entry QR). Optional/lenient; undefined means 'none'. */
   app_on_screen?: 'none' | 'background' | 'featured'
@@ -153,6 +157,7 @@ function coerceBoolean(value: unknown): boolean | undefined {
 
 const UNIT_PRESENCE_VALUES = new Set(['none', 'background', 'featured'])
 const SETTING_VALUES = new Set(['exterior', 'interior', 'unrelated'])
+const UNIT_VIEW_VALUES = new Set(['side', 'rear34', 'rear'])
 
 function normalizeEnum<T extends string>(value: unknown, allowed: Set<string>): T | undefined {
   return typeof value === 'string' && allowed.has(value) ? (value as T) : undefined
@@ -225,6 +230,65 @@ function normalizeLocations(value: unknown): VideoLocation[] | undefined {
   return entries.length > 0 ? entries : undefined
 }
 
+// Words that place a scene's action at the Fresh-CAN unit.
+const UNIT_MENTION = /\b(?:fresh[- ]?can\s+)?(?:unit|truck)\b/i
+
+/**
+ * Deterministic repairs for two planner slips seen in real job f63f3f5c, applied
+ * after normalization so a wrong plan never reaches the image prompts:
+ *  - scene 2 ("scans the QR code at the unit's door") was marked unit_presence
+ *    'none', so it had no unit reference and rendered a generic cafe. An
+ *    exterior scene whose own text puts the action at the unit is upgraded to
+ *    'background';
+ *  - scene 2 also had visual_state.people 0 although its cast_present listed a
+ *    person on screen. People is never fewer than the cast listed as present
+ *    (the clip headcount clause skips an invalid 0, leaving the clip unguarded).
+ * Both only ever add information the scene already contains; a scene the
+ * planner got right is returned unchanged.
+ */
+// The video model scrolls, repeats and morphs the background whenever the camera
+// travels (real jobs a64ab879, 369ff9de: a "slow pan" and a "wide tracking shot
+// from behind" gave a morphing distant truck and a phantom reflection). The
+// planner prompt asks for static shots but ignored it, so this enforces it: a
+// scene with people whose shot_notes ask for camera movement is rewritten to a
+// locked-off shot that keeps the framing words. No LLM call.
+const CAMERA_MOVE =
+  /\b(?:pan|pans|panning|panned|tilt|tilts|tilting|track|tracks|tracking|tracked|dolly|dollying|follow|follows|following|orbit|orbits|orbiting|handheld|hand-held|zoom|zooms|zooming|push|pushes|pushing|pull|pulls|pulling|crane|sweep|sweeps|sweeping|glide|glides|gliding|drift|drifts|drifting|travel|travels|travelling|traveling)\b/i
+const FRAMING =
+  /\b((?:extreme\s+)?(?:wide|medium|close[- ]?up|low[- ]angle|high[- ]angle|over[- ]the[- ]shoulder|establishing|full|two[- ]shot))(?:\s+(shot|angle|close[- ]?up))?/i
+
+/** Rewrites camera-movement shot notes to a static, locked-off shot (scenes with
+ *  people only); a scene with no movement words is returned unchanged (same object). */
+export function lockSceneCamera(scene: ScriptSceneOutput): ScriptSceneOutput {
+  const notes = scene.shot_notes
+  if (!notes || !CAMERA_MOVE.test(notes)) return scene
+  const hasPeople = (scene.cast_present?.length ?? 0) > 0 || (scene.visual_state?.people ?? 0) >= 1
+  if (!hasPeople) return scene
+  const m = FRAMING.exec(notes)
+  const framing = m ? `${m[1].toLowerCase()}${m[2] ? ` ${m[2].toLowerCase()}` : /close|angle|shot/i.test(m[1]) ? '' : ' shot'}` : 'shot'
+  return {
+    ...scene,
+    shot_notes: `Static ${framing}, locked-off camera with no camera movement; the subject moves, the background stays put.`,
+  }
+}
+
+export function repairSceneLayer2(scene: ScriptSceneOutput): ScriptSceneOutput {
+  let out = scene
+  const castCount = scene.cast_present?.length ?? 0
+  const people = scene.visual_state?.people
+  if (castCount > 0 && !(typeof people === 'number' && people >= castCount)) {
+    out = { ...out, visual_state: { ...(scene.visual_state ?? {}), people: castCount } }
+  }
+  if (scene.unit_presence === 'none' && scene.setting === 'exterior' && UNIT_MENTION.test(scene.visual_description)) {
+    out = {
+      ...out,
+      unit_presence: 'background',
+      unit_presence_rationale: 'The scene text places the action at the unit (corrected from "none").',
+    }
+  }
+  return lockSceneCamera(out)
+}
+
 /** Normalizes a parsed script response into VideoScriptOutput, or returns
  *  null if it's missing/malformed in a way that can't be safely coerced.
  *  Deliberately lenient on number-as-string (see coerceNumber) and on
@@ -253,7 +317,7 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
     ) {
       return null
     }
-    scenes.push({
+    scenes.push(repairSceneLayer2({
       scene_number: sceneNumber,
       visual_description: scene.visual_description,
       shot_notes: typeof scene.shot_notes === 'string' ? scene.shot_notes : undefined,
@@ -265,11 +329,12 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
       props_present: toStringArray(scene.props_present),
       unit_presence: normalizeEnum(scene.unit_presence, UNIT_PRESENCE_VALUES),
       unit_presence_rationale: typeof scene.unit_presence_rationale === 'string' ? scene.unit_presence_rationale : undefined,
+      unit_view: normalizeEnum(scene.unit_view, UNIT_VIEW_VALUES),
       app_on_screen: normalizeEnum(scene.app_on_screen, UNIT_PRESENCE_VALUES),
       setting: normalizeEnum(scene.setting, SETTING_VALUES),
       contains_food: coerceBoolean(scene.contains_food),
       is_final_scene: coerceBoolean(scene.is_final_scene),
-    })
+    }))
   }
 
   return {
@@ -291,6 +356,13 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
 // arithmetically impossible (e.g. 10 scenes in 32s).
 const MIN_SCENE_SECONDS = 4
 const MAX_SCENE_SECONDS = 11
+// Preferred cap: long clips of a subject walking away loop their background in
+// the video model (real job a64ab879 scene 4, 11s), and a scene's narration may
+// run 15% over its slot, so a 7s slot already needs a ~10s clip
+// (lib/sceneClipDuration). Honoured whenever the scene count allows it;
+// otherwise relaxed to what the total needs (never past MAX_SCENE_SECONDS) so
+// the planned total still adds up.
+const PREFERRED_MAX_SCENE_SECONDS = 7
 
 /**
  * Forces the scenes' planned durations to sum to EXACTLY `totalSeconds`.
@@ -312,7 +384,7 @@ export function fitSceneDurations<T extends { target_duration_seconds: number }>
   if (n === 0 || !Number.isFinite(total) || total <= 0) return scenes.map((s) => ({ ...s }))
 
   const floor = Math.max(1, Math.min(MIN_SCENE_SECONDS, Math.floor(total / n)))
-  const ceiling = Math.max(floor, MAX_SCENE_SECONDS)
+  const ceiling = Math.max(floor, Math.min(MAX_SCENE_SECONDS, Math.max(PREFERRED_MAX_SCENE_SECONDS, Math.ceil(total / n))))
   const rawSum = scenes.reduce((sum, s) => sum + Math.max(0, s.target_duration_seconds), 0)
   const scale = rawSum > 0 ? total / rawSum : 0
   const durations = scenes.map((s) => {
@@ -350,26 +422,94 @@ export function fitSceneDurations<T extends { target_duration_seconds: number }>
  * reference shows no door there. Fails open: any error or a rewrite that still
  * crosses keeps the original scene.
  */
+/**
+ * Asks the model, by MEANING rather than keyword, which scenes have anyone
+ * entering, leaving, emerging from, stepping through or standing in the open
+ * doorway of the unit — in the picture OR the narration. The regexes
+ * (visualDescribesUnitCrossing / narrationDescribesCrossing) missed real
+ * phrasings: "steps back outside" (no unit word in the sentence) and
+ * "reemerges" in job 369ff9de, whose clip then showed a second man inside the
+ * truck. Fails open (empty set) on any error.
+ */
+export async function judgeDoorwayCrossings(
+  scenes: readonly ScriptSceneOutput[],
+  scriptGenerator: ScriptGenerator,
+): Promise<Set<number>> {
+  try {
+    const result = await scriptGenerator.generate({
+      systemPrompt:
+        'You review scenes of a short video about a mobile grocery store (a maroon container truck, "the unit"). ' +
+        'Decide from MEANING, not keywords, whether a scene\'s visual_description or narration_intent has ANYONE ' +
+        'entering the unit, leaving it, coming or stepping out of it ("steps back outside" after shopping counts), ' +
+        'emerging from it, going through its door, or standing or starting or ending in its open doorway. ' +
+        'Arriving at the unit, standing beside it, shopping already inside, or walking away from it with groceries ' +
+        'already outside are fine. Respond with strictly valid JSON: { "scenes": [ { "scene_number": number, ' +
+        '"crosses_doorway": boolean } ] }, one entry per scene given.',
+      userPrompt: JSON.stringify(
+        scenes.map((s) => ({
+          scene_number: s.scene_number,
+          visual_description: s.visual_description,
+          shot_notes: s.shot_notes ?? '',
+          narration_intent: s.narration_intent,
+        })),
+      ),
+      stepName: 'generate_script',
+    })
+    const rows = (result.parsed as { scenes?: unknown })?.scenes
+    if (!Array.isArray(rows)) return new Set()
+    return new Set(
+      rows
+        .filter((r) => r && typeof r === 'object' && (r as { crosses_doorway?: unknown }).crosses_doorway === true)
+        .map((r) => (r as { scene_number: number }).scene_number),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+const wordCount = (t: string) => t.trim().split(/\s+/).filter(Boolean).length
+
+/**
+ * Scenes whose picture or narration shows or says someone entering or leaving
+ * the unit are rewritten once as an outside-beside-the-unit frame (door closed,
+ * nobody in the doorway). The planner prompt already asks for that cut, but a
+ * model that writes "exit the unit" makes the image model draw a door on the
+ * unit's side (job c07bfcf6 scene 4), and one that writes "steps back outside"
+ * makes the clip model invent whoever comes out (job 369ff9de scene 4). A scene
+ * is flagged by the keyword patterns OR by judgeDoorwayCrossings' read of the
+ * meaning. Fails open: any error or a rewrite that still crosses keeps the
+ * original scene (a rewritten narration is only accepted when it no longer
+ * crosses and stays within 40% of its original length).
+ */
 export async function fixUnitCrossingScenes(
   scenes: ScriptSceneOutput[],
   scriptGenerator: ScriptGenerator,
 ): Promise<ScriptSceneOutput[]> {
-  const flagged = scenes.filter((s) => visualDescribesUnitCrossing(s.visual_description))
+  const judged = await judgeDoorwayCrossings(scenes, scriptGenerator)
+  const flagged = scenes.filter(
+    (s) =>
+      judged.has(s.scene_number) ||
+      visualDescribesUnitCrossing(s.visual_description) ||
+      narrationDescribesCrossing(s.narration_intent),
+  )
   if (flagged.length === 0) return scenes
   try {
     const result = await scriptGenerator.generate({
       systemPrompt:
-        'Rewrite each scene so nobody enters, exits, or crosses the unit\'s doorway on screen. Show the customer ' +
-        'standing on the pavement beside the unit, already carrying their groceries, with the unit\'s plain side ' +
-        'panel behind them (or, for a shopping scene, show them inside already). Keep the same people, mood, ' +
-        'setting and story meaning, and keep the same length. Shot notes keep a side or three-quarter view of the ' +
-        'unit. Respond with strictly valid JSON: { "scenes": [ { "scene_number": number, "visual_description": ' +
-        'string, "shot_notes": string } ] }, one entry per scene given.',
+        'Rewrite each scene so nobody enters, exits, or crosses the unit\'s doorway on screen or in the narration. ' +
+        'Show the customer standing on the pavement beside the unit, already carrying their groceries, with the ' +
+        'unit\'s plain side panel behind them and its door closed (or, for a shopping scene, show them inside ' +
+        'already). Keep the same people, mood, setting and story meaning, and keep the same length. Shot notes ' +
+        'stay a static, locked-off side or three-quarter view of the unit. narration_intent stays a plain-language ' +
+        'description of the idea (never a finished sentence), with no entering, exiting, stepping in or out, or ' +
+        'emerging. Respond with strictly valid JSON: { "scenes": [ { "scene_number": number, "visual_description": ' +
+        'string, "shot_notes": string, "narration_intent": string } ] }, one entry per scene given.',
       userPrompt: JSON.stringify(
         flagged.map((s) => ({
           scene_number: s.scene_number,
           visual_description: s.visual_description,
           shot_notes: s.shot_notes ?? '',
+          narration_intent: s.narration_intent,
         })),
       ),
       stepName: 'generate_script',
@@ -379,11 +519,18 @@ export async function fixUnitCrossingScenes(
     return scenes.map((s) => {
       const r = rewritten.find((x) => x?.scene_number === s.scene_number)
       if (!r || typeof r.visual_description !== 'string' || visualDescribesUnitCrossing(r.visual_description)) return s
-      return {
+      const n = r.narration_intent
+      const narrationOk =
+        typeof n === 'string' &&
+        n.trim().length > 0 &&
+        !narrationDescribesCrossing(n) &&
+        Math.abs(wordCount(n) - wordCount(s.narration_intent)) <= Math.max(3, wordCount(s.narration_intent) * 0.4)
+      return lockSceneCamera({
         ...s,
         visual_description: r.visual_description,
         shot_notes: typeof r.shot_notes === 'string' && r.shot_notes.trim() ? r.shot_notes : s.shot_notes,
-      }
+        narration_intent: narrationOk ? n : s.narration_intent,
+      })
     })
   } catch {
     return scenes
@@ -413,6 +560,7 @@ export function extractVisualState(narrationIntent: unknown): SceneVisualState |
 export interface SceneLayer2Fields {
   unit_presence?: 'none' | 'background' | 'featured'
   unit_presence_rationale?: string
+  unit_view?: 'side' | 'rear34' | 'rear'
   app_on_screen?: 'none' | 'background' | 'featured'
   setting?: 'exterior' | 'interior' | 'unrelated'
   contains_food?: boolean
@@ -426,6 +574,7 @@ export function extractSceneLayer2Fields(narrationIntent: unknown): SceneLayer2F
   return {
     unit_presence: normalizeEnum(v.unit_presence, UNIT_PRESENCE_VALUES),
     unit_presence_rationale: typeof v.unit_presence_rationale === 'string' ? v.unit_presence_rationale : undefined,
+    unit_view: normalizeEnum(v.unit_view, UNIT_VIEW_VALUES),
     app_on_screen: normalizeEnum(v.app_on_screen, UNIT_PRESENCE_VALUES),
     setting: normalizeEnum(v.setting, SETTING_VALUES),
     contains_food: coerceBoolean(v.contains_food),
@@ -567,6 +716,7 @@ export async function runGenerateScript(
             props_present: s.props_present,
             unit_presence: s.unit_presence,
             unit_presence_rationale: s.unit_presence_rationale,
+            unit_view: s.unit_view,
             app_on_screen: s.app_on_screen,
             setting: s.setting,
             contains_food: s.contains_food,

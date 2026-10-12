@@ -35,14 +35,14 @@ export function resolveWordsPerSecond(measured?: number | null): number {
 // only needs to block an edit that would force localize_script's
 // per-language rewrite to badly compress the semantic content just to fit
 // the scene's time slot, not one that's merely a bit generous.
-const TOLERANCE = 1.15
+export const NARRATION_TOLERANCE = 1.15
 
 /** The hard word-count ceiling for a scene's narration_intent text, derived
  *  from its own target_duration_ms. Both the client counter and the
  *  server-side enforcement call this same function, so they can never
  *  disagree at the boundary. */
 export function maxNarrationWords(targetDurationMs: number, wordsPerSecond = NARRATION_WORDS_PER_SECOND): number {
-  return Math.ceil((targetDurationMs / 1000) * wordsPerSecond * TOLERANCE)
+  return Math.ceil((targetDurationMs / 1000) * wordsPerSecond * NARRATION_TOLERANCE)
 }
 
 export function narrationWordCount(text: string): number {

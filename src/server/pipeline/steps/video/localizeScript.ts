@@ -57,10 +57,26 @@ const CROSSING_PATTERNS: readonly RegExp[] = [
   /\b(?:rush|rushes|rushed|rushing|head|heads|headed|heading)\s+(?:in|inside|into)\b/i,
   /\b(?:climb|climbs|climbed|climbing|jump|jumps|jumped|jumping)\s+(?:in|into|out|from|inside|down)\b/i,
   /\b(?:come|comes|came|coming|emerge|emerges|emerged|emerging)\s+(?:out|from)\b/i,
+  /\bre-?emerg(?:e|es|ed|ing)\b/i, // "reemerges" has no out/from after it
   // French
   /\b(?:entre|entrent|entrer|entrant|entré|entrée|entrés)\s+(?:dans|à l'intérieur)\b/i,
   /\b(?:sort|sortent|sortir|sortant|sorti|sortie|sortis)\s+(?:de|du|d')/i,
   /\b(?:monte|montent|monter|descend|descendent|descendre)\s+(?:dans|à bord|de|du)\b/i,
+]
+
+// Extra phrasings for the visual check only (narration keeps the narrower
+// list above, since it has no unit-word proximity guard). Each still has to
+// sit within 40 chars of a unit word to count, so "heads out onto the street"
+// is not flagged. Added after "exit the unit" proved too narrow a net: the
+// image model draws a door wherever the scene text puts a crossing.
+const VISUAL_CROSSING_PATTERNS: readonly RegExp[] = [
+  /\b(?:leave|leaves|left|leaving)\s+(?:the\s+)?(?:fresh[- ]?can\s+)?(?:unit|truck|vehicle|container)\b/i,
+  /\bout\s+of\s+(?:the\s+)?(?:fresh[- ]?can\s+)?(?:unit|truck|vehicle|container)\b/i,
+  /\b(?:through|past)\s+(?:the\s+)?(?:\w+\s+){0,2}(?:door|doors|doorway|entrance)\b/i,
+  /\b(?:hop|hops|hopped|hopping|board|boards|boarded|boarding)\s+(?:on\s*board|aboard|onto|on|into)\b/i,
+  /\b(?:climb|climbs|climbed|climbing|step|steps|stepped|stepping)\s+(?:off|down\s+from|onto|up\s+into)\b/i,
+  /\b(?:head|heads|headed|heading|walk|walks|walked|walking|come|comes|came|coming)\s+out\b/i,
+  /\b(?:sortir|sort|sortent)\b/i,
 ]
 
 const UNIT_WORDS = /\b(?:unit|truck|vehicle|container|fresh[- ]?can|camion|unité)\b/i
@@ -69,7 +85,7 @@ const UNIT_WORDS = /\b(?:unit|truck|vehicle|container|fresh[- ]?can|camion|unit�
  *  unit ("exit the unit"), so a home or street exit ("steps out onto the
  *  street") never matches. */
 export function visualDescribesUnitCrossing(text: string): boolean {
-  return CROSSING_PATTERNS.some((pattern) => {
+  return [...CROSSING_PATTERNS, ...VISUAL_CROSSING_PATTERNS].some((pattern) => {
     const g = new RegExp(pattern.source, 'gi')
     for (let m = g.exec(text); m; m = g.exec(text)) {
       const around = text.slice(Math.max(0, m.index - 40), m.index + m[0].length + 40)

@@ -57,7 +57,7 @@ import { runLocalizeScript } from '../../server/pipeline/steps/video/localizeScr
 import { runSynthesizeVoice } from '../../server/pipeline/steps/video/synthesizeVoice'
 import { runTranscribeAudio } from '../../server/pipeline/steps/video/transcribeAudio'
 import { runRenderLanguageTrack } from '../../server/pipeline/steps/video/renderLanguageTrack'
-import { OpenAIScriptGenerator, OpenAIImageValidator } from '../../server/pipeline/adapters/openai'
+import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator } from '../../server/pipeline/adapters/openai'
 import { KieVideoGenerator } from '../../server/pipeline/adapters/kie'
 import { NanoBananaImageGenerator } from '../../server/pipeline/adapters/nanoBanana'
 import { FakeKieImageGenerator, FakeKieVideoGenerator } from '../../server/pipeline/adapters/kieFake'
@@ -124,6 +124,10 @@ async function sceneVideoGenerator(jobId: string): Promise<VideoGenerator> {
 // OpenAIScriptGenerator above, which KIE_FAKE_MODE never gates either).
 async function sceneImageValidator(jobId: string) {
   return new OpenAIImageValidator(await getApiKey('openai', { jobId }))
+}
+
+async function sceneClipValidator(jobId: string) {
+  return new OpenAIClipValidator(await getApiKey('openai', { jobId }))
 }
 
 async function fetchPipeline(pipelineId: string): Promise<PipelineRow> {
@@ -287,6 +291,7 @@ async function runSceneVisualsUntilSettled(
   const uploader = new SupabaseVideoStorageUploader(client)
   const scaler = new UploadPostAVMerger(await getApiKey('upload_post', { jobId }))
   const imageValidator = await sceneImageValidator(jobId)
+  const clipValidator = await sceneClipValidator(jobId)
 
   let pipeline = await fetchPipeline(pipelineId)
   for (let attempt = 0; attempt < MAX_RETRY_LOOP_ITERATIONS; attempt++) {
@@ -303,6 +308,7 @@ async function runSceneVisualsUntilSettled(
         5000,
         aspectRatio,
         imageValidator,
+        clipValidator,
       )
       return fetchPipeline(pipelineId)
     })
@@ -372,9 +378,16 @@ export const videoTrackRender = inngest.createFunction(
     // completing instead of instantly failing validation (see
     // avMerger.ts's buildCaptionAssFile header for that fix), so total
     // render wall-clock time only just started exceeding whatever this
-    // ceiling was. 30m gives real headroom over the 20-min per-poll-loop
-    // ceiling render can legitimately take across its several passes.
-    timeouts: { finish: '30m' },
+    // ceiling was. 30m gave headroom over one 20-min poll loop, but 'finish'
+    // counts from the START of the run, and this run first waits for the
+    // shared visuals (up to MAX_VISUALS_WAIT_ITERATIONS x ~20s, ~41 min). Real
+    // job 369ff9de waited ~13 min (slow upload-post.com downscale queue) and
+    // the render, started with ~15 min left, was CANCELLED at 30m mid-render,
+    // leaving the track at 'rendering' with no error. Budget: wait <=41m +
+    // localize/voice/transcribe ~2m + render <=4 passes x 20m = ~123m, so 150m.
+    // A cancellation skips onFailure; runCancelled.ts fails the track on the
+    // cancel event and the sweeper (renderStalledAfter) is the fallback.
+    timeouts: { finish: '150m' },
   },
   async ({ event, step }) => {
     const { trackId, pipelineId, jobId } = event.data as {

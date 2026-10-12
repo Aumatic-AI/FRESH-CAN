@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { OpenAIScriptGenerator, OpenAIImageValidator } from './openai'
+import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, CLIP_ISSUE_PEOPLE, CLIP_VALIDATION_SYSTEM_PROMPT } from './openai'
 import { ProviderCallError } from './types'
 
 function mockFetch(response: Partial<Response> & { jsonBody?: unknown; textBody?: string }) {
@@ -152,5 +152,70 @@ describe('OpenAIImageValidator', () => {
   it('throws ProviderCallError on a non-OK response', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 500, textBody: 'boom' })
     await expect(new OpenAIImageValidator('test-key', fetchImpl).validate(input)).rejects.toBeInstanceOf(ProviderCallError)
+  })
+})
+
+describe('OpenAIClipValidator (finished-clip frame check)', () => {
+  const frames = [Buffer.from('f1'), Buffer.from('f2'), Buffer.from('f3')]
+  const input = {
+    stillUrl: 'https://example.com/still.png',
+    frames,
+    visualDescription: 'The worker holds an apple beside the unit.',
+    expectedPeople: 1,
+    unitPresence: 'featured' as const,
+  }
+
+  function validatorReturning(content: string) {
+    const fetchImpl = mockFetch({ jsonBody: { choices: [{ message: { content } }] } })
+    return { validator: new OpenAIClipValidator('test-key', fetchImpl), fetchImpl }
+  }
+
+  it('sends the still first, then every frame as a base64 JPEG, with the plan\'s headcount', async () => {
+    const { validator, fetchImpl } = validatorReturning('{"issues":[]}')
+    expect(await validator.validate(input)).toEqual({ pass: true, issues: [] })
+    const body = JSON.parse((fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string)
+    expect(body.model).toBe('gpt-4o')
+    expect(body.messages[0].content).toBe(CLIP_VALIDATION_SYSTEM_PROMPT)
+    const user = body.messages[1].content
+    expect(user[0].text).toContain('exactly 1 person')
+    expect(user[0].text).toContain('truck is part of this scene')
+    expect(user[1]).toEqual({ type: 'image_url', image_url: { url: input.stillUrl } })
+    expect(user.slice(2).map((c: { image_url: { url: string } }) => c.image_url.url)).toEqual(
+      frames.map((f) => `data:image/jpeg;base64,${f.toString('base64')}`),
+    )
+  })
+
+  it('rejects only blocking, high-confidence defects', async () => {
+    const { validator } = validatorReturning(
+      JSON.stringify({
+        issues: [
+          { text: CLIP_ISSUE_PEOPLE, severity: 'blocking', confidence: 'high' },
+          { text: 'slight blur', severity: 'minor', confidence: 'high' },
+          { text: 'maybe a bag', severity: 'blocking', confidence: 'low' },
+        ],
+      }),
+    )
+    const r = await validator.validate(input)
+    expect(r.pass).toBe(false)
+    expect(r.issues).toEqual([CLIP_ISSUE_PEOPLE])
+    expect(r.ignoredIssues).toHaveLength(2)
+  })
+
+  it('fails open: no frames, or an unparseable reply, passes', async () => {
+    const { validator, fetchImpl } = validatorReturning('not json')
+    expect(await validator.validate(input)).toEqual({ pass: true, issues: [] })
+    expect(await validator.validate({ ...input, frames: [] })).toEqual({ pass: true, issues: [] })
+    expect((fetchImpl as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1) // the empty-frames call never hit the API
+  })
+
+  it('names the four defect classes with the exact texts the retry routing keys on', () => {
+    for (const t of [
+      'extra or duplicated person in the clip',
+      'someone crossing or emerging from the unit, or its door swinging open',
+      'new object that is not in the source still',
+      'truck or wordmark morphing or garbled',
+    ]) {
+      expect(CLIP_VALIDATION_SYSTEM_PROMPT).toContain(t)
+    }
   })
 })

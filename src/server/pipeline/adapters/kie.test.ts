@@ -156,6 +156,7 @@ describe('KieVideoGenerator (Seedance 1.5 Pro image-to-video — docs.kie.ai/mar
         aspect_ratio: '9:16',
         resolution: '720p',
         generate_audio: false,
+        fixed_lens: true,
         duration: 5,
       },
     })
