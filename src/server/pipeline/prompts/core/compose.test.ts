@@ -7,6 +7,7 @@ import {
   composeSceneImageEditPrompt,
   composeSceneVideoPrompt,
   composeCharacterRefPrompt,
+  composeCastRefPrompt,
   pickExteriorByView,
   appUiVideoClause,
   sceneGuardVideoClause,
@@ -1018,21 +1019,18 @@ describe('composeSceneVideoPrompt', () => {
     expect(prompt).toContain('Slow push-in')
   })
 
-  it('describes the camera positively: one smooth, continuous, grounded take (no staged orbit or hero push-in wording)', () => {
+  it('keeps the camera locked off in the fallback prompt too — every shot is planned static', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('One smooth, continuous take with a grounded, documentary-style camera')
+    expect(prompt).toContain('Locked-off, static camera: no pan, tilt, tracking, dolly or zoom.')
+    expect(prompt).toContain('One continuous take.')
+    expect(prompt).not.toContain('pans, tilts, tracking, slow dolly, rack focus')
+    expect(prompt).not.toContain('camera adds a layer on top')
   })
 
-  it('gives real cinematographic technique explicit positive permission, not just "subtle" motion', () => {
+  it('animates the subject action plus ambient environmental motion, never camera motion', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('pans, tilts, tracking, slow dolly, rack focus')
-  })
-
-  it('animates subject action, ambient environmental motion, and camera motion as three distinct layers, never camera as a substitute for scene action', () => {
-    const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('three distinct layers')
+    expect(prompt).toContain("Animate only the subject's own action described above")
     expect(prompt).toContain('wind moving hair, fabric, or leaves, water, shifting light')
-    expect(prompt).toContain('The subject and environment supply the actual motion; the camera adds a layer on top')
   })
 
   it('forbids illogical motion on static objects (e.g. produce) with no visible cause — regression for real Seedance renders showing vegetables/groceries drifting on their own', () => {
@@ -1059,7 +1057,7 @@ describe('composeSceneVideoPrompt', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: longText, shotNotes: longText })
     expect(prompt.length).toBeLessThanOrEqual(2500)
     expect(prompt).toContain('where every motion has a real cause')
-    expect(prompt).toContain('One smooth, continuous take with a grounded, documentary-style camera')
+    expect(prompt).toContain('Locked-off, static camera')
   })
 
   it('does not truncate a normal, realistic scene at all', () => {
@@ -1346,10 +1344,17 @@ describe('self-serve guard + interior scenes', () => {
 })
 
 describe('composeSceneVideoPrompt entry/exit rule', () => {
-  it('keeps everyone on one side of the doorway for the whole clip', () => {
-    expect(composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })).toContain(
+  it('keeps everyone on one side of the doorway when the door is in frame', () => {
+    expect(composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null, doorInFrame: true })).toContain(
       'Everyone stays on one side of the doorway for the whole clip',
     )
+  })
+
+  it('never mentions a doorway when no door is in frame — the video model draws what the prompt names (job d289e3af)', () => {
+    expect(composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })).not.toContain('doorway')
+    expect(
+      composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null, motion: 'She smiles. Everything else holds still.' }),
+    ).not.toContain('doorway')
   })
 })
 
@@ -1586,7 +1591,8 @@ describe('composeSceneVideoPrompt — AI-written motion line', () => {
     expect(out).not.toContain('wide tracking shot')
     expect(out).not.toContain('three distinct layers')
     expect(out).toContain('Locked-off, static camera.')
-    expect(out).toContain('Everyone stays on one side of the doorway')
+    expect(out).not.toContain('doorway')
+    expect(composeSceneVideoPrompt({ ...base, motion, doorInFrame: true })).toContain('Everyone stays on one side of the doorway')
     expect(out.length).toBeLessThan(800)
   })
 
@@ -1624,5 +1630,63 @@ describe('composeSceneVideoPrompt — no repeating background', () => {
       expect(out).toContain('each motion plays out once')
       expect(out.length).toBeLessThanOrEqual(2450)
     }
+  })
+})
+
+describe('cast reference portraits (job d289e3af: one person, a different face per scene)', () => {
+  const resident = {
+    id: 'resident',
+    role: 'resident',
+    age_range: '30-35',
+    appearance: 'Woman of South Asian heritage with warm brown skin and a low black ponytail',
+    wardrobe: 'olive-green jacket, cream shirt, dark-indigo jeans, white trainers',
+    distinguishing_details: 'small silver stud earrings',
+  }
+  const sceneJob = {
+    pipelineId: 'pipe-1',
+    sceneNumber: 3,
+    visualDescription: 'She stops and turns her head towards the maroon store.',
+    shotNotes: 'Static medium-wide shot.',
+    characterRefUrl: 'https://example.com/character-ref.png',
+    cast: [resident],
+  }
+  const portrait = { id: 'resident', label: 'the resident', url: 'https://example.com/cast-ref-resident.png' }
+
+  it('builds a plain full-body portrait prompt from the cast bible, with no vehicle and no reference image', () => {
+    const { prompt, referenceImageUrl } = composeCastRefPrompt(BRAND_PROFILE, resident)
+    expect(referenceImageUrl).toBeUndefined()
+    expect(prompt).toContain('full-body reference photograph of one real person')
+    expect(prompt).toContain('Woman of South Asian heritage')
+    expect(prompt).toContain('Wearing olive-green jacket')
+    expect(prompt).toContain('small silver stud earrings')
+    expect(prompt).toContain('no vehicle')
+  })
+
+  it('attaches the portrait after the vehicle reference and says which image is which', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured', castReferences: [portrait] })
+    expect(out.referenceImageUrl).toBe(sceneJob.characterRefUrl)
+    expect(out.extraReferenceImageUrls).toEqual([portrait.url])
+    expect(out.prompt).toContain('Image 1 is the location reference')
+    expect(out.prompt).toContain('image 2 is the resident')
+  })
+
+  it('makes the portrait image 1 in a scene without the unit (no vehicle reference attached)', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'none', castReferences: [portrait] })
+    expect(out.referenceImageUrl).toBeUndefined()
+    expect(out.extraReferenceImageUrls).toEqual([portrait.url])
+    expect(out.prompt).toContain('image 1 is the resident')
+    expect(out.prompt).not.toContain('Image 1 is the location reference')
+  })
+
+  it('caps the attached portraits so a busy scene never buries the vehicle reference', () => {
+    const many = [1, 2, 3, 4, 5].map((n) => ({ id: `p${n}`, label: `person ${n}`, url: `https://example.com/p${n}.png` }))
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured', castReferences: many })
+    expect(out.extraReferenceImageUrls).toHaveLength(3)
+  })
+
+  it('changes nothing when no portraits are given (the previous text-only behavior)', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured' })
+    expect(out.extraReferenceImageUrls).toBeUndefined()
+    expect(out.prompt).not.toContain('Person reference photos')
   })
 })

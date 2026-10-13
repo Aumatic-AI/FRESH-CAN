@@ -46,6 +46,7 @@ import {
   getVisualAssets,
   getVideoScenes,
   getVideoSceneAudioRows,
+  getVideoPlanDraftData,
   type PipelineRow,
   type TrackRow,
 } from '../../server/pipeline/db'
@@ -53,6 +54,8 @@ import { interpretIntent } from '../../server/pipeline/steps/shared/interpretInt
 import { runGenerateScript, type VideoScriptJobInput } from '../../server/pipeline/steps/video/generateScript'
 import { runGenerateCharacterRef } from '../../server/pipeline/steps/video/generateCharacterRef'
 import { runGenerateSceneVisual } from '../../server/pipeline/steps/video/generateSceneVisual'
+import { runGenerateCastRef } from '../../server/pipeline/steps/video/generateCastRefs'
+import { normalizeCastBible } from '../../server/pipeline/steps/video/generateScript'
 import { runDraftNarration } from '../../server/pipeline/steps/video/draftNarration'
 import { runLocalizeScript } from '../../server/pipeline/steps/video/localizeScript'
 import { runSynthesizeVoice } from '../../server/pipeline/steps/video/synthesizeVoice'
@@ -290,6 +293,39 @@ async function runCharacterRefUntilSettled(
 }
 
 /**
+ * One reference portrait per recurring person (generateCastRefs.ts), each in
+ * its own durable step so a retry never re-pays for a finished portrait.
+ * Fail-open: returns only the portraits that succeeded, and an empty map
+ * (text-only cast, the previous behavior) when CAST_REFERENCE_IMAGES=off.
+ */
+async function generateCastRefs(
+  step: Step,
+  jobId: string,
+  pipelineId: string,
+  aspectRatio: AspectRatio | undefined,
+): Promise<Record<string, string>> {
+  if (process.env.CAST_REFERENCE_IMAGES === 'off') return {}
+  const cast = await step.run('fetch-cast-bible', async () => {
+    const plan = await getVideoPlanDraftData(client, pipelineId)
+    // Same 4-person cap as the cast clause (compose.ts castClause).
+    return (normalizeCastBible(plan?.cast_bible) ?? []).slice(0, 4)
+  })
+  if (cast.length === 0) return {}
+
+  const generator = await characterRefGenerator(jobId)
+  const uploader = new SupabaseVideoStorageUploader(client)
+  const urls: Record<string, string> = {}
+  for (const person of cast) {
+    const url = await step.run(`cast-ref-${person.id}`, async () => {
+      const current = await fetchPipeline(pipelineId)
+      return runGenerateCastRef(client, current, person, generator, uploader, aspectRatio)
+    })
+    if (url) urls[person.id] = url
+  }
+  return urls
+}
+
+/**
  * Loops runGenerateSceneVisual — each call is one "wave" across every scene
  * (image or clip, whichever each scene needs next), fanned internally via
  * Promise.allSettled (see that file's own header for why that fan-out isn't
@@ -302,6 +338,7 @@ async function runSceneVisualsUntilSettled(
   pipelineId: string,
   characterRefUrl: string,
   aspectRatio: AspectRatio | undefined,
+  castRefUrls: Record<string, string>,
 ): Promise<PipelineRow> {
   const imageGen = await sceneImageGenerator(jobId)
   const videoGen = await sceneVideoGenerator(jobId)
@@ -328,6 +365,7 @@ async function runSceneVisualsUntilSettled(
         imageValidator,
         clipValidator,
         motionWriter,
+        castRefUrls,
       )
       return fetchPipeline(pipelineId)
     })
@@ -368,7 +406,15 @@ export const videoApprove = inngest.createFunction(
       return { status: 'failed', stage: 'generate_character_ref' }
     }
 
-    const finalPipeline = await runSceneVisualsUntilSettled(step, jobId, pipelineId, characterRef.characterRefUrl, aspectRatio)
+    const castRefUrls = await generateCastRefs(step, jobId, pipelineId, aspectRatio)
+    const finalPipeline = await runSceneVisualsUntilSettled(
+      step,
+      jobId,
+      pipelineId,
+      characterRef.characterRefUrl,
+      aspectRatio,
+      castRefUrls,
+    )
     return { status: finalPipeline.status }
   },
 )

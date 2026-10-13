@@ -45,6 +45,9 @@ export class NanoBananaImageGenerator implements ImageGenerator {
   ) {}
 
   async submit(input: ImageGenerationInput): Promise<ImageJobRef> {
+    const imageInput = [input.referenceImageUrl, ...(input.extraReferenceImageUrls ?? [])].filter(
+      (url): url is string => !!url,
+    )
     await kieSubmitLimiter.acquire()
     const res = await this.fetchImpl(`${this.baseUrl}/api/v1/jobs/createTask`, {
       method: 'POST',
@@ -61,7 +64,7 @@ export class NanoBananaImageGenerator implements ImageGenerator {
           // callers that never set aspectRatio (blog/image_post); video
           // always passes its own '9:16'/'1:1'/'16:9'.
           aspect_ratio: input.aspectRatio ?? '4:5',
-          ...(input.referenceImageUrl ? { image_input: [input.referenceImageUrl] } : {}),
+          ...(imageInput.length > 0 ? { image_input: imageInput } : {}),
         },
       }),
     })

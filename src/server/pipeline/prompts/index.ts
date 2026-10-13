@@ -19,6 +19,8 @@ export {
   composeInlinePrompt,
   composePhotoPrompt,
   composeCharacterRefPrompt,
+  composeCastRefPrompt,
+  MAX_CAST_REFERENCES,
   composeSceneImagePrompt,
   composeSceneImageEditPrompt,
   composeSceneVideoPrompt,
@@ -28,6 +30,7 @@ export {
   appUiImageClause,
   type ImageComposition,
   type UnitPresence,
+  type CastReference,
 } from './core/compose'
 export {
   composeIntentSystemPrompt,

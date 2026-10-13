@@ -73,6 +73,14 @@ export interface ImageGenerationInput {
    */
   referenceImageUrl?: string
   /**
+   * Further reference photos sent after referenceImageUrl, in order — the
+   * recurring people's cast reference portraits (generateCastRefs.ts), so a
+   * scene can carry both the vehicle and each person's locked look. Only
+   * NanoBananaImageGenerator sends them (its `image_input` takes several
+   * images); the Flux Kontext adapters take a single image and ignore this.
+   */
+  extraReferenceImageUrls?: string[]
+  /**
    * Passed straight through to the underlying model's own aspect-ratio
    * param (`aspectRatio` on KieImageGenerator's endpoint, `aspect_ratio`
    * on KieSceneImageGenerator's AND NanoBananaImageGenerator's — the
@@ -180,6 +188,9 @@ export interface ClipMotionInput {
   shotNotes?: string | null
   /** The clip length being requested, so the actions are paced to it. */
   durationSeconds: number
+  /** True only when the unit's door is in the frame (rear views) — the only
+   *  case where the writer is told about a door at all. */
+  doorInFrame?: boolean
 }
 
 /** Writes the short, motion-only prompt for the image-to-video model from the

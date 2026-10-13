@@ -250,6 +250,19 @@ describe('OpenAIClipMotionWriter', () => {
     expect(user[1]).toEqual({ type: 'image_url', image_url: { url: input.stillUrl } })
   })
 
+  it('mentions a door only when a door is in the frame (job d289e3af: "stays outside the doorway" on a sidewalk shot)', async () => {
+    expect(CLIP_MOTION_SYSTEM_PROMPT).not.toMatch(/door/i)
+    const plain = mockFetch({ jsonBody: { choices: [{ message: { content: 'x' } }] } })
+    await new OpenAIClipMotionWriter('k', plain).write(input)
+    const plainText = JSON.parse((plain as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string).messages[1].content[0].text
+    expect(plainText).not.toMatch(/door/i)
+
+    const rear = mockFetch({ jsonBody: { choices: [{ message: { content: 'x' } }] } })
+    await new OpenAIClipMotionWriter('k', rear).write({ ...input, doorInFrame: true })
+    const rearText = JSON.parse((rear as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string).messages[1].content[0].text
+    expect(rearText).toContain("The unit's rear door is in this frame")
+  })
+
   it('throws a ProviderCallError on a non-OK response (the caller falls back)', async () => {
     const fetchImpl = mockFetch({ ok: false, status: 500, textBody: 'boom' })
     await expect(new OpenAIClipMotionWriter('k', fetchImpl).write(input)).rejects.toBeInstanceOf(ProviderCallError)

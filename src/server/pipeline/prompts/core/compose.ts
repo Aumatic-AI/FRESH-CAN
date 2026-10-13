@@ -23,6 +23,9 @@ import { assertNoContradiction } from './contradictions'
 export interface ImageComposition {
   prompt: string
   referenceImageUrl?: string
+  /** Sent after referenceImageUrl (see ImageGenerationInput's field of the
+   *  same name) — only scene images set it, with cast reference portraits. */
+  extraReferenceImageUrls?: string[]
 }
 
 /** Layer 2's unit-presence rubric (PROMPT_REFACTOR_BRIEF.md §8), now the
@@ -766,6 +769,68 @@ export function composeCharacterRefPrompt(brand: BrandProfile, job: CharacterRef
   return { prompt, referenceImageUrl }
 }
 
+/** One recurring person's reference portrait, attached to a scene image. */
+export interface CastReference {
+  /** cast_bible id, e.g. "resident". */
+  id: string
+  /** Short human label used in the prompt ("the resident"). */
+  label: string
+  url: string
+}
+
+/** cast_bible entries get one reference portrait each; scenes carry at most
+ *  this many, so a busy scene never buries the vehicle reference. */
+export const MAX_CAST_REFERENCES = 3
+
+/**
+ * One recurring person's reference portrait (generateCastRefs.ts) — a plain,
+ * full-body photo of that person in their fixed outfit, generated once per
+ * pipeline generation and then attached to every scene they appear in.
+ * Before this, the shared character_ref was a picture of the TRUCK, so the
+ * people had only text to go on and came out looking different per scene
+ * (job d289e3af). No brand reference: this image is only about the person.
+ */
+export function composeCastRefPrompt(brand: BrandProfile, person: CastBibleEntry): ImageComposition {
+  const field = (v: string | undefined) => v?.trim() ?? ''
+  const details = [
+    field(person.age_range) ? `Age ${field(person.age_range)}.` : '',
+    field(person.appearance),
+    field(person.wardrobe) ? `Wearing ${field(person.wardrobe)}.` : '',
+    field(person.distinguishing_details),
+  ].filter(Boolean)
+  const parts = [
+    'A plain full-body reference photograph of one real person standing naturally and facing the camera, ' +
+      'in soft, even daylight against a plain light-grey background, the whole body in frame from head to shoes, ' +
+      'arms relaxed with both hands visible.',
+    ...details,
+    'Only this one person in the frame, no other people, no vehicle, no props beyond what is described.',
+    PHOTOREALISTIC_QUALITY_FLOOR,
+    brand.noTextInstruction,
+  ]
+  const prompt = parts.join(' ')
+  assertNoContradiction(prompt, brand)
+  return { prompt }
+}
+
+/**
+ * Tells the image model what each attached image is for. With a vehicle or
+ * interior reference attached it is image 1 and the people follow; without
+ * one the people start at image 1. Spelled out because REFERENCE_IS_GUIDE_*
+ * says not to reuse the reference's people — that applies to the vehicle
+ * photo, never to these portraits, whose whole point is the person.
+ */
+function castReferenceClause(refs: readonly CastReference[], hasPrimaryReference: boolean): string {
+  if (refs.length === 0) return ''
+  const first = hasPrimaryReference ? 2 : 1
+  const list = refs.map((r, i) => `image ${first + i} is ${r.label}`).join('; ')
+  const primary = hasPrimaryReference ? 'Image 1 is the location reference described below. ' : ''
+  return (
+    `${primary}Person reference photos: ${list}. Draw each of these people with exactly that face, skin tone, ` +
+    'hair, build and outfit — the same individual, not a look-alike. Use those photos only for who the person ' +
+    'is: never copy their pose, plain background, lighting or framing.'
+  )
+}
+
 /** The aspect ratios the dashboard offers for video (content_jobs.aspect_ratio). */
 type SceneAspectRatio = '9:16' | '1:1' | '16:9'
 
@@ -798,6 +863,12 @@ interface SceneImageJob {
    *  would let the model reinvent the subject's appearance per scene,
    *  exactly the bug this design fixes (ARCHITECTURE.MD §4.1). */
   characterRefUrl: string
+  /** Cast reference portraits (generateCastRefs.ts) for the people in THIS
+   *  scene, attached after the vehicle/interior reference. Text alone (the
+   *  cast clause) let the same person come out with a different face each
+   *  scene; an image anchor is what holds a face. Empty/undefined keeps the
+   *  text-only behavior. */
+  castReferences?: readonly CastReference[]
   /** Set by POST /video/regenerate { scope: "visuals" } — never present on
    *  a first-time generation. */
   regenInstructions?: string | null
@@ -1017,6 +1088,8 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   const contentsRule = compact ? SCENE_CONTENTS_RULE_COMPACT : SCENE_CONTENTS_RULE
   const qualityFloor = compact ? PHOTOREALISTIC_QUALITY_FLOOR_COMPACT : PHOTOREALISTIC_QUALITY_FLOOR
   const guideNotCopy = compact ? REFERENCE_IS_GUIDE_COMPACT : REFERENCE_IS_GUIDE_NOT_COPY
+  const castRefs = (job.castReferences ?? []).slice(0, MAX_CAST_REFERENCES)
+  const castRefClause = castReferenceClause(castRefs, showSubject)
 
   // Everything below is a fixed brand/safety constraint sent in full,
   // always — see limits.ts's PROMPT_LIMITS.sceneImage for why these can
@@ -1028,6 +1101,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // actually in the prompt (it tells the model those are constraints, not
   // the point) — a 'none' scene carries no brand details for it to govern.
   const fixedParts = [
+    castRefClause,
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
@@ -1138,6 +1212,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     // Right after the scene itself — who is in frame is part of what to
     // draw, not a trailing constraint.
     cast,
+    castRefClause,
     continuityClause,
     guardClause,
     // Same look per pipeline (not per scene) — keeps lighting/atmosphere
@@ -1179,7 +1254,9 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
 
   const prompt = parts.filter(Boolean).join(' ')
   assertNoContradiction(prompt, brand)
-  return { prompt, referenceImageUrl }
+  return castRefs.length > 0
+    ? { prompt, referenceImageUrl, extraReferenceImageUrls: castRefs.map((r) => r.url) }
+    : { prompt, referenceImageUrl }
 }
 
 interface SceneImageEditJob {
@@ -1250,6 +1327,12 @@ interface SceneVideoJob {
    *  and the long boilerplate: Seedance already sees the still, so the prompt
    *  only says what moves plus a compact set of the clauses that matter. */
   motion?: string
+  /** True when the unit's door is actually in the frame (a rear / rear
+   *  three-quarter view). Only then is the stay-on-one-side-of-the-doorway
+   *  clause added: video models draw what a prompt names, so saying
+   *  "doorway" over a sidewalk or side-panel shot invited a door that was
+   *  never there (job d289e3af scenes 1 and 7). */
+  doorInFrame?: boolean
 }
 
 /** Prompt for Seedance 1.5 Pro image-to-video (adapters/kie.ts's
@@ -1412,7 +1495,7 @@ export function composeSceneVideoPrompt(job: SceneVideoJob): string {
       'fixed background and steady lighting. The reference frame is the source of truth: every person, limb, and ' +
       'object stays exactly as shown.' +
       GROUNDED_CLAUSE +
-      NO_ENTRY_EXIT_CLIP_CLAUSE +
+      (job.doorInFrame ? NO_ENTRY_EXIT_CLIP_CLAUSE : '') +
       SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
       ' Photorealistic footage with natural color and lighting.' +
       lookHoldClause(job.look) +
@@ -1423,18 +1506,18 @@ export function composeSceneVideoPrompt(job: SceneVideoJob): string {
   }
   const peopleClause = 'every person, limb, and object stays exactly as shown; the shot holds exactly what the frame holds.'
   const suffix =
-    " Animate this as three distinct layers: the subject's own action described above; any natural ambient " +
+    // Locked camera here too: every shot is planned static (the script prompt
+    // forbids camera moves because the video model morphs a moving
+    // background), so this fallback must not invite pans or tracking.
+    " Animate only the subject's own action described above, plus any natural ambient " +
     'motion already implied by the setting — wind moving hair, fabric, or leaves, water, ' +
     'shifting light — where every motion has a real ' +
     'cause: produce, goods and other solid objects at rest stay still unless a ' +
-    'visible hand, wind, or other real force moves them; and camera motion as a separate layer ' +
-    'on top of those two — follow whatever camera direction is given above (pans, tilts, tracking, slow ' +
-    'dolly, rack focus) with smooth, real-camera motion. The subject and environment supply the actual ' +
-    'motion; the camera adds a layer on top. One smooth, continuous take with a grounded, documentary-style ' +
-    'camera. The reference frame is the source of truth — ' +
+    'visible hand, wind, or other real force moves them. Locked-off, static camera: no pan, tilt, ' +
+    'tracking, dolly or zoom. One continuous take. The reference frame is the source of truth — ' +
     peopleClause +
     GROUNDED_CLAUSE +
-    NO_ENTRY_EXIT_CLIP_CLAUSE +
+    (job.doorInFrame ? NO_ENTRY_EXIT_CLIP_CLAUSE : '') +
     SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
     TEMPORAL_CONSISTENCY_CLAUSE +
     NO_REPEATING_BACKGROUND_CLAUSE +

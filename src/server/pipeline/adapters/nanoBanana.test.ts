@@ -37,6 +37,30 @@ describe('NanoBananaImageGenerator (KIE nano-banana-2)', () => {
     expect(parsed.input.image_input).toEqual(['https://example.com/ref.jpg'])
   })
 
+  it('submit() sends the primary reference first, then the extra reference images, in order', async () => {
+    let capturedBody: string | undefined
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = init?.body as string
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { taskId: 't' } }), text: async () => '' }
+    }) as unknown as typeof fetch
+    await new NanoBananaImageGenerator('k', fetchImpl).submit({
+      prompt: 'scene',
+      referenceImageUrl: 'https://example.com/truck.png',
+      extraReferenceImageUrls: ['https://example.com/person.png'],
+    })
+    expect(JSON.parse(capturedBody!).input.image_input).toEqual(['https://example.com/truck.png', 'https://example.com/person.png'])
+  })
+
+  it('submit() sends only the extra references when there is no primary reference', async () => {
+    let capturedBody: string | undefined
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = init?.body as string
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { taskId: 't' } }), text: async () => '' }
+    }) as unknown as typeof fetch
+    await new NanoBananaImageGenerator('k', fetchImpl).submit({ prompt: 'scene', extraReferenceImageUrls: ['https://example.com/person.png'] })
+    expect(JSON.parse(capturedBody!).input.image_input).toEqual(['https://example.com/person.png'])
+  })
+
   it("submit() sends aspect_ratio (not image_size), defaulting to '4:5' when aspectRatio is unset", async () => {
     let capturedBody: string | undefined
     const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {

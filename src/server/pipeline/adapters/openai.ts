@@ -110,7 +110,9 @@ const IMAGE_VALIDATION_SYSTEM_PROMPT =
   'regeneration, so only report defects a typical viewer would clearly notice. Check ONLY for: an extra ' +
   'person not implied by the scene, a hand or arm that clearly belongs to no visible or implied person ' +
   '(disembodied, floating, or coming out of an impossible place), duplicate or malformed limbs on one ' +
-  'person, a floating or impossible object, a required subject missing entirely, or an obviously ' +
+  'person, a person missing a limb or with part of their body vanishing mid-frame (not simply cut off by the ' +
+  'frame edge), a person whose face the scene calls for but who is cropped so the face is cut off, ' +
+  'a floating or impossible object, a required subject missing entirely, or an obviously ' +
   'illogical scene, or a collage / split-screen / stacked multi-panel layout (the image must be ONE ' +
   'single continuous photograph). NOT defects: hands or arms of a visible person, or hands implied by the described ' +
   'action (holding, tapping, picking up, cooking, reading, eating, first-person or over-the-shoulder ' +
@@ -132,7 +134,9 @@ export const UNIT_STRUCTURE_VALIDATION_CLAUSE =
   '"Fresh CAN" wordmark) or on its front face, and a "Fresh CAN" wordmark appearing more than once on one ' +
   'side panel. The truck\'s REAR face holds its only opening, a black-frame glass double door: that door, and ' +
   'the rear face next to the long side in a three-quarter view, are normal and must NOT be reported. Use the ' +
-  'text "door or opening drawn on the truck\'s side or front".'
+  'text "door or opening drawn on the truck\'s side or front". Also report as blocking a truck whose overall shape ' +
+  'is clearly wrong — a cube, a container with no cab, or a vehicle far shorter or taller than a normal box ' +
+  'truck — using the text "truck shape clearly wrong".'
 
 // Always on (every scene): a readable third-party brand on packaging, clothing
 // or signage (real job a64ab879: a chip bag legibly reading "Doritos") breaks
@@ -339,9 +343,17 @@ export const CLIP_MOTION_SYSTEM_PROMPT =
   'characters): one or two small, concrete, natural actions of the people or things already visible in the frame ' +
   '(a gesture, a head turn, a step, a breath, a smile), plus light ambient motion only if the frame already ' +
   'implies it (a breeze in hair or leaves). Then say everything else holds still. Pace the actions to the clip ' +
-  'length. Mention only people and objects that are visible in the frame, and keep everyone on the same side of ' +
-  'any door or doorway they are on in the frame. Keep the camera out of it: it is locked off. Leave reflections ' +
-  'and anything not in the frame out. Reply with the sentences only: no quotes, no labels.'
+  'length. Take the actions from the scene intent and keep their direction exactly as written there (left, right, ' +
+  'towards or away from the camera). Mention only people and objects that are visible in the frame. Keep the ' +
+  'camera out of it: it is locked off. Leave reflections and anything not in the frame out. Reply with the ' +
+  'sentences only: no quotes, no labels.'
+
+// Only sent when a door is actually in the frame (rear views). Saying "door"
+// for every scene made the writer put doors into sidewalk shots ("She stays
+// outside the doorway", job d289e3af scene 1) and the video model drew them.
+const DOOR_IN_FRAME_NOTE =
+  " The unit's rear door is in this frame: it stays closed, and everyone stays on the side of it they are on."
+
 
 export class OpenAIClipMotionWriter implements ClipMotionWriter {
   constructor(
@@ -366,7 +378,8 @@ export class OpenAIClipMotionWriter implements ClipMotionWriter {
                 text:
                   `Scene intent: ${input.visualDescription}` +
                   `${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''} ` +
-                  `Clip length: ${input.durationSeconds} seconds.`,
+                  `Clip length: ${input.durationSeconds} seconds.` +
+                  (input.doorInFrame ? DOOR_IN_FRAME_NOTE : ''),
               },
               { type: 'image_url', image_url: { url: input.stillUrl } },
             ],

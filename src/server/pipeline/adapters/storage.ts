@@ -62,6 +62,12 @@ export class SupabasePhotoStorageUploader implements PhotoStorageUploader {
  */
 const VIDEO_STORAGE_BUCKET = 'freshcan-videos'
 
+/** Public URL a path in the video bucket would have (no network call) — for
+ *  checking whether a deterministic-path asset was already uploaded. */
+export function videoStoragePublicUrl(client: SupabaseClient, path: string): string {
+  return client.storage.from(VIDEO_STORAGE_BUCKET).getPublicUrl(path).data.publicUrl
+}
+
 export interface VideoStorageUploader {
   /** For ElevenLabs' audio bytes (no ephemeral URL to download from — the
    *  provider call is synchronous and hands back a Buffer directly) and for

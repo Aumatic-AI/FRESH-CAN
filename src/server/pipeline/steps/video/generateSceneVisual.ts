@@ -289,6 +289,9 @@ export function isCollageIssue(issue: string): boolean {
 interface ScenePlanContext {
   look?: VideoScriptLook
   castBible?: CastBibleEntry[]
+  /** cast_bible id -> that person's reference portrait (generateCastRefs.ts).
+   *  Missing ids just fall back to the text-only cast clause. */
+  castRefUrls?: Record<string, string>
 }
 
 /** Shape of a validation-rejected attempt's output_snapshot. */
@@ -434,7 +437,12 @@ async function runSceneImageStep(
       // source.
       const layer2 = extractSceneLayer2Fields(scene.narration_intent)
       const castIds = new Set(layer2.cast_present ?? [])
-      const { prompt, referenceImageUrl } = editFrom
+      const castInScene = plan.castBible?.filter((c) => castIds.has(c.id))
+      const castReferences = (castInScene ?? []).flatMap((c) => {
+        const url = plan.castRefUrls?.[c.id]
+        return url ? [{ id: c.id, label: `the ${c.role?.trim() || c.id}`, url }] : []
+      })
+      const { prompt, referenceImageUrl, extraReferenceImageUrls } = editFrom
         ? composeSceneImageEditPrompt(BRAND_PROFILE, {
             ...editFrom,
             unitPresence: layer2.unit_presence,
@@ -456,7 +464,8 @@ async function runSceneImageStep(
             containsFood: layer2.contains_food,
             // Only people this scene explicitly lists — an unknown/empty
             // cast_present never pulls a recurring person into the frame.
-            cast: plan.castBible?.filter((c) => castIds.has(c.id)),
+            cast: castInScene,
+            castReferences,
             look: plan.look,
           })
 
@@ -464,7 +473,7 @@ async function runSceneImageStep(
         console.log(`[${stepName}] EDIT-MODE RETRY (attempt ${attemptNumber}) — fixing: ${editFrom.issues.join('; ')}`)
       }
       console.log(`[${stepName}] NEW SUBMISSION (attempt ${attemptNumber})`)
-      jobRef = await imageGenerator.submit({ prompt, referenceImageUrl, aspectRatio })
+      jobRef = await imageGenerator.submit({ prompt, referenceImageUrl, extraReferenceImageUrls, aspectRatio })
 
       // Persist the task id BEFORE polling — this is the fix. Previously
       // this row only ever recorded providerRef on the FINAL, successful
@@ -742,6 +751,7 @@ async function runSceneVideoClipStep(
   // The AI-written motion line used for THIS attempt's submission, kept in the
   // succeeded step's snapshot so a bad clip can be traced to its prompt.
   let motionLine: string | undefined
+  let submittedThisRun = false
   // Set only when a downscale job was already submitted (and billed, though
   // upload-post.com's downscale is unbilled today) and left unresolved by a
   // previous attempt — same "provider_ref set + status still 'generating'"
@@ -827,6 +837,12 @@ async function runSceneVideoClipStep(
         // already reads for the still-image step, no new DB read.
         const layer2 = extractSceneLayer2Fields(scene.narration_intent)
         const durationSeconds = pickClipDurationSeconds(plannedSlotMs(scene.narration_intent, scene.target_duration_ms))
+        // Only rear views show the unit's door; everywhere else the door
+        // wording is left out so the video model has no door to draw.
+        const doorInFrame =
+          layer2.setting !== 'interior' &&
+          (layer2.unit_presence ?? 'none') !== 'none' &&
+          (layer2.unit_view === 'rear' || layer2.unit_view === 'rear34')
         // A short motion-only line written from the approved still (the video
         // model already sees the still, so the scene text is not repeated).
         // Any failure or a line that fails the lint falls back to the
@@ -838,6 +854,7 @@ async function runSceneVideoClipStep(
               visualDescription: scene.visual_description,
               shotNotes: scene.shot_notes,
               durationSeconds,
+              doorInFrame,
             })
             motionLine = lintClipMotion(written) ?? undefined
             if (!motionLine) console.log(`[${stepName}] motion line rejected by lint, using the scene-text prompt: ${String(written).slice(0, 160)}`)
@@ -847,6 +864,7 @@ async function runSceneVideoClipStep(
         }
         const prompt = composeSceneVideoPrompt({
           motion: motionLine,
+          doorInFrame,
           visualDescription: scene.visual_description,
           shotNotes: scene.shot_notes,
           isFinalScene,
@@ -857,6 +875,7 @@ async function runSceneVideoClipStep(
         })
 
         console.log(`[${stepName}] NEW SUBMISSION (attempt ${attemptNumber})`)
+        submittedThisRun = true
         jobRef = await videoGenerator.submit({
           prompt,
           referenceImageUrl: sceneImageUrl,
@@ -1082,6 +1101,9 @@ async function runSceneVideoClipStep(
         fileUrl: permanentUrl,
         ...(clipCheckIssues?.length ? { clipCheckIssues } : {}),
         ...(motionLine ? { motionPrompt: motionLine } : {}),
+        // A resumed task was submitted by an earlier run, so its motion line
+        // is not in memory here — say so instead of implying none was used.
+        ...(!motionLine && !submittedThisRun ? { motionPrompt: '(resumed task: prompt was set by the earlier submission)' } : {}),
       },
     })
   } catch (err) {
@@ -1238,6 +1260,9 @@ export async function runGenerateSceneVisual(
    *  Omitted by every existing test, which keeps their exact prior behavior;
    *  CLIP_MOTION_PROMPT=off disables it at runtime. */
   motionWriter?: ClipMotionWriter,
+  /** cast_bible id -> reference portrait (generateCastRefs.ts). Omitted by
+   *  every existing test, which keeps their exact prior behavior. */
+  castRefUrls?: Record<string, string>,
 ): Promise<{ ran: boolean }> {
   if (pipeline.status !== 'generating') return { ran: false }
 
@@ -1261,6 +1286,7 @@ export async function runGenerateSceneVisual(
   const plan: ScenePlanContext = {
     look: normalizeLook(planData?.look),
     castBible: normalizeCastBible(planData?.cast_bible),
+    castRefUrls,
   }
 
   const assets = await getVisualAssets(client, pipeline.id, generation)
