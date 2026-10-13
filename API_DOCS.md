@@ -174,11 +174,17 @@ All three routes require a session (`proxy.ts` **and** an in-route check → `40
 
 ### Jobs — Video
 
+#### `POST /api/jobs/[jobId]/video/resume`
+
+**Description:** Resumes a video whose SHARED pipeline (character ref / per-scene image+clip generation) failed after approval. Only allowed when the pipeline is `failed` and was not cancelled by the user (`last_error` is not `Cancelled by user`) and has language tracks (i.e. it was approved); otherwise 409. Already-ready assets are never regenerated, so no repeat provider charges. Resets failed visual assets' `attempt_number` to 1, sets the pipeline back to `generating` (compare-and-swap on `failed`), resets tracks that failed with `Shared pipeline failed: …` to `waiting_on_shared`, sets a `failed` job back to `generating`, then sends fresh `content/video.approve` and `content/video.track.render` events.
+
+**Response 200:** `{ "pipeline": {...}, "tracksResumed": 1 }`
+
 #### `POST /api/jobs/[jobId]/video/script`
 **Auth:** Requires session (gated by `src/proxy.ts`)
-**Description:** Edits per-scene narration text before approval. Writes `video_scenes.narration_intent.text` (preserving every other field already on that scene's `narration_intent`) — the field `localize_script`/`synthesize_voice` actually read, not the `content_drafts.draft_data.script` summary blob. Also recomputes that summary blob from the edited scenes so the pre-approval "Script" card stays consistent. Only allowed while the video pipeline's status is `draft_ready`; once approved, the scene plan is locked and edits are rejected.
+**Description:** Edits each scene's SPOKEN narration (English) before approval. Writes `video_scenes.narration_intent.narration` (preserving every other field, including the model's semantic brief in `.text`). That narration is written at draft time by the `draft-narration` step (`src/server/pipeline/steps/video/draftNarration.ts`, runs right after `generate_script`) and shown in the dashboard's "Narration script"; on approval `localize_script` uses it verbatim for EN and translates it for FR, so the approved text is what is spoken. Also recomputes `content_drafts.draft_data.script` from the edited narration. Only allowed while the video pipeline's status is `draft_ready`; once approved, the scene plan is locked and edits are rejected.
 
-Each scene's narration is capped at a word budget derived from its own `target_duration_ms` (`src/lib/videoNarrationBudget.ts`'s `maxNarrationWords` — the same ~3.1 words/sec rate `localize_script`'s per-language rewrite targets, plus ~15% tolerance for the render step's own slack). An edit that would exceed a scene's budget is rejected with a 400, naming the scene and its limit.
+Each scene's narration is held to a hard word limit — the `narration_limit.max` stored with the scene when the narration was written (the selected voice's measured rate), else `narrationWordRange(target_duration_ms).max` from `src/lib/videoNarrationBudget.ts` (default 2.65 words/sec x 1.05). The same band is shown in the editor's live counter. An edit is rejected with a 400 (naming the scene) if it is over the limit, writes the brand name possessively/plural ("Fresh-CAN's", mis-transcribed by speech-to-text), or describes someone entering/leaving the unit (the video never shows it). Below-band narration is allowed (the editor warns), since it only shortens the video. A legacy draft with no stored narration shows empty boxes; if left empty, `localize_script` writes narration from the scene intents as before.
 
 **Request Body:**
 ```json
@@ -265,6 +271,7 @@ These are fired from the frontend — documented here for reference.
 | 2026-07-17 | Created | POST /api/auth/logout |
 | 2026-09-14 | Created (replaces n8n `image_questions` webhook) | POST /api/jobs/[jobId]/image/questions |
 | 2026-09-24 | Created | POST /api/jobs/[jobId]/video/script |
+| 2026-10-13 | Changed | POST /api/jobs/[jobId]/video/script — edits now target the spoken narration (`narration_intent.narration`) with a hard word limit and content checks |
 | 2026-09-24 | Created | POST /api/jobs/[jobId]/blog/draft |
 | 2026-10-01 | Created | GET /api/settings/keys, PUT/DELETE /api/settings/keys/[provider] |
 | 2026-10-01 | Created | GET /api/settings/upload-post |
