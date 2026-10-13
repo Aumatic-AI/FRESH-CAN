@@ -391,11 +391,22 @@ export function buildAudioConcatCommand(scenes: AVMergeInput['scenes']): {
 // own deliberate "outro" moment — just enough to soften the literal edge.
 const FADE_OUT_SECONDS = 0.6
 
+// Silent tail added after the last narration word (2026-10-13). The fade
+// used to start FADE_OUT_SECONDS before the end of the narration, which is
+// also where the audio track ends, so the last word or two were faded out
+// and `-shortest` then cut the file right after (real render d289e3af:
+// final-scene audio dropped from -2dB to -16dB over its last 0.4s). The
+// video holds its last frame and the audio is padded with silence for this
+// long, and the fade runs over that tail instead of over speech. Must be
+// >= FADE_OUT_SECONDS so the fade never reaches back into the narration.
+const END_TAIL_SECONDS = 0.8
+
 function muxFadeArgs(totalDurationSeconds: number): string {
-  const fadeStart = Math.max(0, totalDurationSeconds - FADE_OUT_SECONDS)
+  const fadeStart = Math.max(0, totalDurationSeconds + END_TAIL_SECONDS - FADE_OUT_SECONDS)
+  const tail = END_TAIL_SECONDS.toFixed(2)
   return (
-    `-vf "fade=t=out:st=${fadeStart.toFixed(2)}:d=${FADE_OUT_SECONDS.toFixed(2)}" ` +
-    `-af "afade=t=out:st=${fadeStart.toFixed(2)}:d=${FADE_OUT_SECONDS.toFixed(2)}" `
+    `-vf "tpad=stop_mode=clone:stop_duration=${tail},fade=t=out:st=${fadeStart.toFixed(2)}:d=${FADE_OUT_SECONDS.toFixed(2)}" ` +
+    `-af "apad=pad_dur=${tail},afade=t=out:st=${fadeStart.toFixed(2)}:d=${FADE_OUT_SECONDS.toFixed(2)}" `
   )
 }
 

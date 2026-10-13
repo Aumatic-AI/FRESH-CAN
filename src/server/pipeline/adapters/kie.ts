@@ -24,6 +24,25 @@ import { kieSubmitLimiter } from '../lib/kieRateLimiter'
  * see that class's own header for the full history. Kept here, tested,
  * for potential future reuse rather than deleted.
  */
+/**
+ * KIE.ai reports poll errors as HTTP 200 with the error in the body
+ * (e.g. `{"code":422,"msg":"The record does not exist","data":null}`), so
+ * `res.ok` alone never sees them. Without this check a lost/expired task
+ * parsed as "no successFlag/state yet" and was returned as 'pending' until
+ * our own poll timer expired (confirmed live 2026-10-12: a scene image
+ * "timed out" on all 5 attempts). 404/422 mean the task is genuinely gone —
+ * a definite failure, so the caller stops waiting and resubmits. Any other
+ * non-200 code is treated as transient: thrown as a ProviderCallError with
+ * no http status, which pollUntilDone logs and retries on its next tick.
+ */
+function checkPollEnvelope(body: { code?: number; msg?: string }): { status: 'failed'; detail: string } | undefined {
+  const code = body.code
+  if (code === undefined || code === 200) return undefined
+  const detail = `KIE.ai poll returned code ${code}: ${body.msg ?? 'no message'}`
+  if (code === 404 || code === 422) return { status: 'failed', detail }
+  throw new ProviderCallError('kie', null, detail)
+}
+
 export class KieImageGenerator implements ImageGenerator {
   constructor(
     private readonly apiKey: string,
@@ -75,12 +94,16 @@ export class KieImageGenerator implements ImageGenerator {
     }
 
     const data = (await res.json()) as {
+      code?: number
+      msg?: string
       data?: {
         successFlag?: number
         errorMessage?: string | null
         response?: { resultImageUrl?: string }
       }
     }
+    const envelopeFailure = checkPollEnvelope(data)
+    if (envelopeFailure) return envelopeFailure
     const inner = data.data
 
     // successFlag: 0 GENERATING, 1 SUCCESS, 2 CREATE_TASK_FAILED, 3 GENERATE_FAILED
@@ -177,12 +200,16 @@ export class KieSceneImageGenerator implements ImageGenerator {
     }
 
     const data = (await res.json()) as {
+      code?: number
+      msg?: string
       data?: {
         state?: 'waiting' | 'queuing' | 'generating' | 'success' | 'fail'
         resultJson?: string
         failMsg?: string | null
       }
     }
+    const envelopeFailure = checkPollEnvelope(data)
+    if (envelopeFailure) return envelopeFailure
     const inner = data.data
 
     if (inner?.state === 'success') {
@@ -338,12 +365,16 @@ export class KieVideoGenerator implements VideoGenerator {
     }
 
     const data = (await res.json()) as {
+      code?: number
+      msg?: string
       data?: {
         state?: 'waiting' | 'queuing' | 'generating' | 'success' | 'fail'
         resultJson?: string
         failMsg?: string
       }
     }
+    const envelopeFailure = checkPollEnvelope(data)
+    if (envelopeFailure) return envelopeFailure
     const inner = data.data
 
     if (inner?.state === 'success') {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getVideoScenes, upsertVideoScenes } from '@/server/pipeline/db'
 import { applyScriptEdits, buildScriptSummary } from '@/server/pipeline/steps/video/updateScript'
+import { readSceneNarration } from '@/lib/videoNarrationBudget'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -9,9 +10,10 @@ function getSupabase() {
   return createClient(url, key)
 }
 
-// Lets the user edit each scene's narration text — the actual unit
-// generate_script produces and the ONLY thing localize_script/
-// synthesize_voice read (see updateScript.ts's own header) — while the
+// Lets the user edit each scene's spoken narration (English, written at draft
+// time by draftNarration.ts and stored as narration_intent.narration; held to
+// the scene's word limit by applyScriptEdits). localize_script uses it
+// verbatim for EN and translates it for FR — while the
 // pipeline is still at 'draft_ready'. Once approved, generate_character_ref/
 // generate_scene_visual/the per-track render chain are already consuming the
 // current scene plan, so edits are locked (matches video's existing
@@ -86,10 +88,7 @@ export async function POST(
   const script = buildScriptSummary(
     mergedScenes.map((s) => ({
       scene_number: s.scene_number,
-      narrationText:
-        s.narration_intent && typeof (s.narration_intent as Record<string, unknown>).text === 'string'
-          ? ((s.narration_intent as Record<string, unknown>).text as string)
-          : '',
+      narrationText: readSceneNarration(s.narration_intent),
     })),
   )
 

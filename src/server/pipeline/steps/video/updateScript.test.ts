@@ -1,7 +1,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { applyScriptEdits, buildScriptSummary } from './updateScript'
-import { maxNarrationWords, NARRATION_WORDS_PER_SECOND, resolveWordsPerSecond } from '../../../../lib/videoNarrationBudget'
+import { maxNarrationWords, narrationWordRange, NARRATION_WORDS_PER_SECOND, resolveWordsPerSecond } from '../../../../lib/videoNarrationBudget'
 import { composeLocalizeScriptSystemPrompt, BRAND_PROFILE } from '../../prompts/index'
 import type { VideoSceneRow } from '../../db'
 
@@ -21,19 +21,22 @@ function scene(overrides: Partial<VideoSceneRow> = {}): VideoSceneRow {
 }
 
 describe('applyScriptEdits', () => {
-  it('merges edited text into narration_intent while preserving other fields', () => {
+  it('stores the edit as the spoken narration while preserving every other field, including the intent text', () => {
     const result = applyScriptEdits([scene()], [{ id: 'scene-1', narration: 'New narration.' }])
     expect('error' in result).toBe(false)
     if ('error' in result) return
     expect(result.updates).toEqual([
-      { sceneNumber: 1, narrationIntent: { text: 'New narration.', beat: 'setup', unit_presence: 'featured' } },
+      {
+        sceneNumber: 1,
+        narrationIntent: { text: 'Original narration.', narration: 'New narration.', beat: 'setup', unit_presence: 'featured' },
+      },
     ])
   })
 
   it('trims narration text', () => {
     const result = applyScriptEdits([scene()], [{ id: 'scene-1', narration: '  spaced  ' }])
     if ('error' in result) throw new Error('expected success')
-    expect(result.updates[0].narrationIntent.text).toBe('spaced')
+    expect(result.updates[0].narrationIntent.narration).toBe('spaced')
   })
 
   it('only returns updates for edited scenes, not every scene', () => {
@@ -72,27 +75,39 @@ describe('applyScriptEdits', () => {
       [{ id: 'scene-1', narration: 'Fresh text.' }],
     )
     if ('error' in result) throw new Error('expected success')
-    expect(result.updates[0].narrationIntent).toEqual({ text: 'Fresh text.' })
+    expect(result.updates[0].narrationIntent).toEqual({ narration: 'Fresh text.' })
   })
 
-  it('accepts narration right at the word budget for its scene duration', () => {
-    const targetDurationMs = 10_000 // 10s
-    const max = maxNarrationWords(targetDurationMs)
-    const narration = Array.from({ length: max }, (_, i) => `word${i}`).join(' ')
-    const result = applyScriptEdits([scene({ target_duration_ms: targetDurationMs })], [{ id: 'scene-1', narration }])
-    expect('error' in result).toBe(false)
+  it("rejects narration over the scene's word limit (the approved text is spoken verbatim, so it must fit)", () => {
+    const { max } = narrationWordRange(5_000)
+    const over = Array.from({ length: max + 1 }, (_, i) => `word${i}`).join(' ')
+    const result = applyScriptEdits([scene({ target_duration_ms: 5_000 })], [{ id: 'scene-1', narration: over }])
+    expect('error' in result && result.error).toContain(`over the ${max}-word limit`)
   })
 
-  it('rejects narration that exceeds its scene budget, naming the scene and the budget', () => {
-    const targetDurationMs = 10_000 // 10s
-    const max = maxNarrationWords(targetDurationMs)
-    const narration = Array.from({ length: max + 1 }, (_, i) => `word${i}`).join(' ')
-    const result = applyScriptEdits([scene({ target_duration_ms: targetDurationMs })], [{ id: 'scene-1', narration }])
-    expect('error' in result).toBe(true)
-    if ('error' in result) {
-      expect(result.error).toContain('Scene 1')
-      expect(result.error).toContain('10s')
-    }
+  it('accepts narration exactly at the limit', () => {
+    const { max } = narrationWordRange(5_000)
+    const atMax = Array.from({ length: max }, (_, i) => `word${i}`).join(' ')
+    expect('error' in applyScriptEdits([scene({ target_duration_ms: 5_000 })], [{ id: 'scene-1', narration: atMax }])).toBe(false)
+  })
+
+  it("uses the band stored with the scene (the voice's real rate) instead of the default one", () => {
+    const tight = scene({
+      target_duration_ms: 10_000,
+      narration_intent: { text: 'x', narration: 'old', narration_limit: { min: 3, max: 5 } },
+    })
+    expect('error' in applyScriptEdits([tight], [{ id: 'scene-1', narration: 'one two three four five six' }])).toBe(true)
+    expect('error' in applyScriptEdits([tight], [{ id: 'scene-1', narration: 'one two three four five' }])).toBe(false)
+  })
+
+  it('rejects a possessive brand name (speech-to-text mishears it)', () => {
+    const result = applyScriptEdits([scene()], [{ id: 'scene-1', narration: "Thanks to Fresh-CAN's ease." }])
+    expect('error' in result && result.error).toContain('never possessive')
+  })
+
+  it('rejects narration describing someone entering or leaving the unit', () => {
+    const result = applyScriptEdits([scene()], [{ id: 'scene-1', narration: 'She enters the unit and shops.' }])
+    expect('error' in result && result.error).toContain('entering or leaving')
   })
 })
 

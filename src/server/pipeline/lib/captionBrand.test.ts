@@ -36,6 +36,17 @@ describe('mishearings and spoken form', () => {
   })
 })
 
+describe('possessive mishearing (real job da0662d8 "thanks to Fresh Kansis")', () => {
+  it('repairs "Fresh Kansis" when the brand lists that mishearing', () => {
+    const words = [w('thanks', 0, 100), w('to', 100, 200), w('Fresh', 200, 400), w('Kansis.', 400, 800)]
+    expect(fixBrandNameInWords(words, 'Fresh-CAN', ['kansis'])).toEqual([
+      w('thanks', 0, 100),
+      w('to', 100, 200),
+      w('Fresh-CAN.', 200, 800),
+    ])
+  })
+})
+
 describe('brandForSpeech', () => {
   it('respells the brand as plain words for the voice model only', async () => {
     const { brandForSpeech } = await import('./captionBrand')

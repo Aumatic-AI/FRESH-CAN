@@ -1,5 +1,7 @@
 import type { VideoSceneRow } from '../../db'
-import { maxNarrationWords, narrationWordCount } from '../../../../lib/videoNarrationBudget'
+import { BRAND_PROFILE } from '../../prompts/index'
+import { narrationWordCount, readSceneNarrationLimit } from '../../../../lib/videoNarrationBudget'
+import { narrationDescribesCrossing, narrationUsesBrandPossessive } from './localizeScript'
 
 // Unlike every other file in this directory, this isn't called from an
 // Inngest function — it's the pure logic behind POST /api/jobs/[jobId]/
@@ -21,7 +23,8 @@ export interface ScriptEditRequest {
 
 /** One scene's merged result — narrationIntent is the FULL object to persist
  *  (existing Layer 2 fields like beat/cast_present/unit_presence preserved,
- *  only `text` replaced), never a bare string. */
+ *  only `narration` — the spoken English wording — replaced; `text`, the
+ *  model's semantic brief, stays as written), never a bare string. */
 export interface MergedSceneNarration {
   sceneNumber: number
   narrationIntent: Record<string, unknown>
@@ -69,14 +72,22 @@ export function applyScriptEdits(
     if (!scene) {
       return { error: `Scene id ${raw.id} does not belong to this pipeline's current scene plan` }
     }
-    const maxWords = maxNarrationWords(scene.target_duration_ms)
+    // The edited text IS the spoken narration (English) — localize uses it
+    // verbatim — so it is held to the scene's word limit, and to the same two
+    // content rules the model-written narration is held to.
+    const label = `Scene ${scene.scene_number}`
+    const { max } = readSceneNarrationLimit(scene.narration_intent, scene.target_duration_ms)
     const words = narrationWordCount(narration)
-    if (words > maxWords) {
+    if (words > max) {
       return {
-        error:
-          `Scene ${scene.scene_number}'s narration is too long for its ${Math.round(scene.target_duration_ms / 1000)}s ` +
-          `budget (${words} words, max ${maxWords})`,
+        error: `${label}: ${words} words is over the ${max}-word limit for a ${Math.round(scene.target_duration_ms / 1000)}s scene. Shorten it.`,
       }
+    }
+    if (narrationUsesBrandPossessive(narration, BRAND_PROFILE.name)) {
+      return { error: `${label}: write the brand name as plain "${BRAND_PROFILE.name}", never possessive or plural (speech-to-text mishears it).` }
+    }
+    if (narrationDescribesCrossing(narration)) {
+      return { error: `${label}: the narration describes someone entering or leaving the unit, which the video never shows. Reword it.` }
     }
     const existing =
       scene.narration_intent && typeof scene.narration_intent === 'object'
@@ -84,7 +95,7 @@ export function applyScriptEdits(
         : {}
     updates.push({
       sceneNumber: scene.scene_number,
-      narrationIntent: { ...existing, text: narration },
+      narrationIntent: { ...existing, narration },
     })
   }
 

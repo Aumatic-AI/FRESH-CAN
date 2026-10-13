@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, CLIP_ISSUE_PEOPLE, CLIP_VALIDATION_SYSTEM_PROMPT } from './openai'
+import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, OpenAIClipMotionWriter, CLIP_MOTION_SYSTEM_PROMPT, CLIP_ISSUE_PEOPLE, CLIP_VALIDATION_SYSTEM_PROMPT } from './openai'
 import { ProviderCallError } from './types'
 
 function mockFetch(response: Partial<Response> & { jsonBody?: unknown; textBody?: string }) {
@@ -36,6 +36,16 @@ describe('OpenAIScriptGenerator', () => {
     // own doc comment) since it only strips a fence wrapping the ENTIRE
     // response.
     expect(body.response_format).toEqual({ type: 'json_object' })
+  })
+
+  it('defaults to gpt-6.1-sol for text generation, and honors an explicit model override', async () => {
+    const fetchImpl = mockFetch({ jsonBody: { choices: [{ message: { content: '{}' } }] } })
+    const gen = new OpenAIScriptGenerator('test-key', fetchImpl)
+    await gen.generate({ systemPrompt: 'sys', userPrompt: 'user' })
+    await gen.generate({ systemPrompt: 'sys', userPrompt: 'user', model: 'gpt-4o-mini' })
+    const calls = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls
+    expect(JSON.parse(calls[0][1].body as string).model).toBe('gpt-6.1-sol')
+    expect(JSON.parse(calls[1][1].body as string).model).toBe('gpt-4o-mini')
   })
 
   it('returns parsed: null when content is not valid JSON', async () => {
@@ -161,7 +171,6 @@ describe('OpenAIClipValidator (finished-clip frame check)', () => {
     stillUrl: 'https://example.com/still.png',
     frames,
     visualDescription: 'The worker holds an apple beside the unit.',
-    expectedPeople: 1,
     unitPresence: 'featured' as const,
   }
 
@@ -170,14 +179,13 @@ describe('OpenAIClipValidator (finished-clip frame check)', () => {
     return { validator: new OpenAIClipValidator('test-key', fetchImpl), fetchImpl }
   }
 
-  it('sends the still first, then every frame as a base64 JPEG, with the plan\'s headcount', async () => {
+  it('sends the still first, then every frame as a base64 JPEG, with the scene text', async () => {
     const { validator, fetchImpl } = validatorReturning('{"issues":[]}')
     expect(await validator.validate(input)).toEqual({ pass: true, issues: [] })
     const body = JSON.parse((fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string)
     expect(body.model).toBe('gpt-4o')
     expect(body.messages[0].content).toBe(CLIP_VALIDATION_SYSTEM_PROMPT)
     const user = body.messages[1].content
-    expect(user[0].text).toContain('exactly 1 person')
     expect(user[0].text).toContain('truck is part of this scene')
     expect(user[1]).toEqual({ type: 'image_url', image_url: { url: input.stillUrl } })
     expect(user.slice(2).map((c: { image_url: { url: string } }) => c.image_url.url)).toEqual(
@@ -217,5 +225,44 @@ describe('OpenAIClipValidator (finished-clip frame check)', () => {
     ]) {
       expect(CLIP_VALIDATION_SYSTEM_PROMPT).toContain(t)
     }
+  })
+})
+
+describe('OpenAIClipMotionWriter', () => {
+  const input = {
+    stillUrl: 'https://example.com/still.png',
+    visualDescription: 'The worker holds an apple beside the unit.',
+    shotNotes: 'static medium shot',
+    durationSeconds: 6,
+  }
+
+  it('sends the still and the scene text to gpt-6.1-sol and returns the reply text', async () => {
+    const fetchImpl = mockFetch({ jsonBody: { choices: [{ message: { content: 'She lifts the apple. Everything else holds still.' } }] } })
+    const text = await new OpenAIClipMotionWriter('test-key', fetchImpl).write(input)
+    expect(text).toBe('She lifts the apple. Everything else holds still.')
+    const body = JSON.parse((fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0][1].body as string)
+    expect(body.model).toBe('gpt-6.1-sol')
+    expect(body.messages[0]).toEqual({ role: 'system', content: CLIP_MOTION_SYSTEM_PROMPT })
+    const user = body.messages[1].content
+    expect(user[0].text).toContain('The worker holds an apple beside the unit.')
+    expect(user[0].text).toContain('Shot notes: static medium shot')
+    expect(user[0].text).toContain('Clip length: 6 seconds.')
+    expect(user[1]).toEqual({ type: 'image_url', image_url: { url: input.stillUrl } })
+  })
+
+  it('throws a ProviderCallError on a non-OK response (the caller falls back)', async () => {
+    const fetchImpl = mockFetch({ ok: false, status: 500, textBody: 'boom' })
+    await expect(new OpenAIClipMotionWriter('k', fetchImpl).write(input)).rejects.toBeInstanceOf(ProviderCallError)
+  })
+
+  it('returns an empty string when the reply has no content', async () => {
+    const fetchImpl = mockFetch({ jsonBody: { choices: [] } })
+    expect(await new OpenAIClipMotionWriter('k', fetchImpl).write(input)).toBe('')
+  })
+
+  it('tells the model to leave reflections, camera moves and out-of-frame things out', () => {
+    expect(CLIP_MOTION_SYSTEM_PROMPT).toContain('describe only what moves')
+    expect(CLIP_MOTION_SYSTEM_PROMPT).toContain('reflections')
+    expect(CLIP_MOTION_SYSTEM_PROMPT).toContain('locked off')
   })
 })

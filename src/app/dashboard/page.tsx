@@ -10,18 +10,13 @@ import TopBar from '@/components/layout/TopBar'
 import { KPIRowSkeleton } from '@/components/skeletons/Skeleton'
 import ActiveGenerationBanner from '@/components/ActiveGenerationBanner'
 import { RelativeTime } from '@/components/ui/relative-time'
-import JobProgressList, { selectInProgressJobs } from '@/components/JobProgressList'
 import {
   getKPIData,
-  getRecentJobs,
-  getJobProblems,
-  type JobProblem,
   getVideoLibrary,
   getImageLibrary,
   getBlogLibrary,
 } from '@/services/contentService'
 import type {
-  ContentJob,
   KPIData,
   VideoLibraryItem,
   ImageLibraryItem,
@@ -464,27 +459,20 @@ export default function DashboardPage() {
   const [videos, setVideos] = useState<VideoLibraryItem[]>([])
   const [images, setImages] = useState<ImageLibraryItem[]>([])
   const [blogs, setBlogs]   = useState<BlogLibraryItem[]>([])
-  const [jobs, setJobs]     = useState<ContentJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
-  const [problems, setProblems] = useState<Record<string, JobProblem[]>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [kpiData, vids, imgs, blgs, recentJobs] = await Promise.all([
+      const [kpiData, vids, imgs, blgs] = await Promise.all([
         getKPIData(),
         getVideoLibrary(),
         getImageLibrary(),
         getBlogLibrary(),
-        getRecentJobs(30),
       ])
       setKpi(kpiData)
-      setJobs(recentJobs)
-      // Failure reasons are a nicety — never let them fail the dashboard load.
-      const failedIds = selectInProgressJobs(recentJobs).filter((j) => j.status === 'failed').map((j) => j.id)
-      getJobProblems(failedIds).then(setProblems).catch(() => setProblems({}))
       // Grouped by job_id below (videoGroups/imageGroups/blogGroups) so a
       // BOTH-language job renders as one card with a toggle instead of two —
       // sliced to the newest 4 there, not here, since slicing raw EN/FR rows
@@ -572,9 +560,6 @@ export default function DashboardPage() {
 
       {/* Active generation banner */}
       <ActiveGenerationBanner />
-
-      {/* Jobs still moving through the pipeline (from content_jobs.status) */}
-      {!loading && <JobProgressList jobs={selectInProgressJobs(jobs)} problems={problems} />}
 
       {/* KPI Cards */}
       {loading ? (

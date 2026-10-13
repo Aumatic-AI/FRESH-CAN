@@ -13,6 +13,7 @@ import {
 } from './compose'
 import type { BrandProfile } from '../types'
 import { BRAND_PROFILE } from '../brand/fresh-can'
+import { PROMPT_LIMITS } from './limits'
 
 const testBrand: BrandProfile = {
   name: 'Test Brand',
@@ -576,6 +577,63 @@ describe('composeSceneImagePrompt', () => {
     characterRefUrl: 'https://example.com/character-ref.jpg',
   }
 
+  describe('compactFixedText (opt-in compact fixed text)', () => {
+    const job = {
+      ...baseJob,
+      unitPresence: 'featured' as const,
+      unitView: 'rear34' as const,
+      look: { time_of_day: 'early evening', lighting: 'soft dusk', palette: 'maroon, brick and cream clothing', style_direction: 'understated observational film' },
+      cast: [{ id: 'r', role: 'resident', appearance: 'woman with a low ponytail', wardrobe: 'olive jacket' }],
+    }
+
+    it('is clearly shorter than the full fixed text', () => {
+      const full = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+      const compact = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt
+      expect(compact.length).toBeLessThan(full.length * 0.8)
+    })
+
+    it('keeps every structural fact about the unit and the closed-door / no-text rules', () => {
+      const p = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt
+      for (const fact of [
+        'white box truck',
+        '#6B1A1A',
+        'cab is plain white',
+        'appears once, centered, on each of the two side panels',
+        'solid, unbroken maroon steel',
+        'glass double door',
+        'bumper height',
+        'QR panel',
+        'only entrance',
+        'any other vehicle',
+        'rear door stays closed',
+        'nobody stands in or at the doorway',
+        'rear three-quarter view',
+      ]) {
+        expect(p, fact).toContain(fact)
+      }
+    })
+
+    it('keeps the scene description, shot notes and cast whole', () => {
+      const p = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt
+      expect(p).toContain(baseJob.visualDescription)
+      expect(p).toContain('Shot notes: Slow push-in.')
+      expect(p).toContain('woman with a low ponytail')
+    })
+
+    it('does not change the default prompt', () => {
+      const a = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+      const b = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: false }).prompt
+      expect(a).toBe(b)
+    })
+
+    it('appends the unit proportions sentence only when asked', () => {
+      const off = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt
+      const on = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true, unitProportions: true }).prompt
+      expect(off).not.toContain('roughly twice as long as it is tall')
+      expect(on).toContain('roughly twice as long as it is tall')
+    })
+  })
+
   it('attaches the character-ref photo as the edit source when the plan says unitPresence: featured', () => {
     const scene = composeSceneImagePrompt(testBrand, { ...baseJob, unitPresence: 'featured' })
     expect(scene.referenceImageUrl).toBe('https://example.com/character-ref.jpg')
@@ -757,7 +815,8 @@ describe('composeSceneImagePrompt', () => {
     // person's face in whichever scene happens to overflow. The scene
     // description gets shortened first instead.
     const longText = 'a very long descriptive sentence about the scene and its surroundings '.repeat(30)
-    const visualDescription = `The student reads the note. ${longText}`.slice(0, 600).trimEnd()
+    // Oversized past PROMPT_LIMITS.sceneImage so the cascade has to run.
+    const visualDescription = `The student reads the note. ${longText.repeat(5)}`.trimEnd()
     // Cast's own appearance/wardrobe kept to a realistic length (unlike
     // shotNotes/visualDescription above, deliberately oversized to force
     // truncation) — cast text is never itself truncated, only ever kept
@@ -774,7 +833,7 @@ describe('composeSceneImagePrompt', () => {
       unitPresence: 'featured',
       cast: [{ id: 'student', role: 'student', appearance: castText, wardrobe: castText }],
     })
-    expect(scene.prompt.length).toBeLessThanOrEqual(3000)
+    expect(scene.prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
     expect(scene.prompt).toContain('Scene 2: The student reads the note.')
     expect(scene.prompt).not.toContain(visualDescription)
     expect(scene.prompt).toContain('Recurring people')
@@ -797,7 +856,7 @@ describe('composeSceneImagePrompt', () => {
     // featured (the larger-fixed-overhead branch) — confirms this exercised
     // the full-structure path, not the cheaper 'none' one.
     expect(scene.referenceImageUrl).toBeDefined()
-    expect(scene.prompt.length).toBeLessThanOrEqual(3000)
+    expect(scene.prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
     // The fixed safety/brand clauses must survive truncation fully intact —
     // only the free-text fields are ever allowed to shrink.
     expect(scene.prompt).toContain('clean, fresh, tidy, and appetizing')
@@ -853,7 +912,7 @@ describe('composeSceneImagePrompt', () => {
     })
     expect(scene.prompt).toContain(visualDescription)
     expect(scene.prompt).toContain('with natural anatomy; skin looks real')
-    expect(scene.prompt.length).toBeLessThanOrEqual(3000)
+    expect(scene.prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
   })
 
   it('gets materially more room for scene content when the unit is absent (unitPresence: none) — the conditional-inclusion payoff brief §4.4 is after', () => {
@@ -894,7 +953,7 @@ describe('composeSceneImagePrompt', () => {
     expect(scene.prompt).toContain(visualDescription)
     expect(scene.prompt).toContain(shotNotes)
     expect(scene.prompt).toContain('with natural anatomy; skin looks real')
-    expect(scene.prompt.length).toBeLessThanOrEqual(3000)
+    expect(scene.prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
   })
 })
 
@@ -959,9 +1018,9 @@ describe('composeSceneVideoPrompt', () => {
     expect(prompt).toContain('Slow push-in')
   })
 
-  it('steers camera motion away from staged product-reveal moves like orbits or hero push-ins', () => {
+  it('describes the camera positively: one smooth, continuous, grounded take (no staged orbit or hero push-in wording)', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('or a staged product-reveal move (slow orbit, dramatic hero push-in)')
+    expect(prompt).toContain('One smooth, continuous take with a grounded, documentary-style camera')
   })
 
   it('gives real cinematographic technique explicit positive permission, not just "subtle" motion', () => {
@@ -973,34 +1032,34 @@ describe('composeSceneVideoPrompt', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
     expect(prompt).toContain('three distinct layers')
     expect(prompt).toContain('wind moving hair, fabric, or leaves, water, shifting light')
-    expect(prompt).toContain('Camera movement is never a substitute for actual subject or environmental motion')
+    expect(prompt).toContain('The subject and environment supply the actual motion; the camera adds a layer on top')
   })
 
   it('forbids illogical motion on static objects (e.g. produce) with no visible cause — regression for real Seedance renders showing vegetables/groceries drifting on their own', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('never motion with no real cause')
+    expect(prompt).toContain('where every motion has a real cause')
     expect(prompt).toContain('produce, goods and other solid objects at rest stay still')
     expect(prompt).toContain('unless a visible hand, wind, or other real force moves them')
   })
 
   it('guards against frame-to-frame flicker and warped motion blur, regardless of look/isFinalScene', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
-    expect(prompt).toContain('textures, packaging details, and lighting stable and flicker-free across every frame')
-    expect(prompt).toContain('natural, non-warped motion blur')
+    expect(prompt).toContain('textures, packaging details, and lighting steady across every frame')
+    expect(prompt).toContain('natural, smooth motion blur')
   })
 
   it('adds a photographic quality-floor clause regardless of look/isFinalScene, without dictating any camera movement', () => {
     const prompt = composeSceneVideoPrompt({ visualDescription: 'X', shotNotes: null })
     expect(prompt).toContain('premium, photorealistic cinematic smartphone footage')
-    expect(prompt).toContain('polished commercial quality, never oversaturated, over-sharpened, or CGI-looking')
+    expect(prompt).toContain('balanced color and true-to-life sharpness')
   })
 
   it("never exceeds Seedance's real ~2500-char video prompt cap, even with a maximally long visual_description/shot_notes", () => {
     const longText = 'a very long descriptive sentence about the scene and its surroundings '.repeat(40)
     const prompt = composeSceneVideoPrompt({ visualDescription: longText, shotNotes: longText })
     expect(prompt.length).toBeLessThanOrEqual(2500)
-    expect(prompt).toContain('never motion with no real cause')
-    expect(prompt).toContain('staged product-reveal move')
+    expect(prompt).toContain('where every motion has a real cause')
+    expect(prompt).toContain('One smooth, continuous take with a grounded, documentary-style camera')
   })
 
   it('does not truncate a normal, realistic scene at all', () => {
@@ -1217,7 +1276,7 @@ describe('app UI palette clause (maroon + white)', () => {
     for (const appPresence of ['featured', 'background'] as const) {
       const { prompt } = composeSceneImagePrompt(BRAND_PROFILE, { ...job, appPresence })
       expect(prompt).toContain('#6B1A1A')
-      expect(prompt.length).toBeLessThanOrEqual(2995)
+      expect(prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
     }
     for (const appPresence of ['none', undefined] as const) {
       const { prompt } = composeSceneImagePrompt(BRAND_PROFILE, { ...job, appPresence })
@@ -1249,7 +1308,7 @@ describe('self-serve guard + interior scenes', () => {
     expect(BRAND_PROFILE.referenceImages.interior.map((r) => r.url)).toContain(referenceImageUrl)
     expect(prompt).toContain('INSIDE the store')
     expect(prompt).toMatch(/[Ss]elf-serve/)
-    expect(prompt.length).toBeLessThanOrEqual(2995)
+    expect(prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
   })
 
   it('exterior scenes still use the exterior character ref', () => {
@@ -1342,7 +1401,7 @@ describe('Track C: cast survives the length cap (real job 5d2dd9a2 scenes 2-3)',
     expect(prompt).toContain(visualDescription)
     expect(prompt).toContain('Recurring people')
     for (const role of ['mother', 'father', 'child']) expect(prompt).toContain(`the ${role} (`)
-    expect(prompt.length).toBeLessThanOrEqual(2995)
+    expect(prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
   })
 
   it('shrinks the cast block (keeping look + outfit) before it ever cuts the description', () => {
@@ -1355,7 +1414,7 @@ describe('Track C: cast survives the length cap (real job 5d2dd9a2 scenes 2-3)',
   it('never emits a prompt over the cap, and never drops the cast outright just because a long description needs room', () => {
     const long = 'The family moves slowly down the narrow aisle, comparing produce and reading nothing at all. '.repeat(8)
     const { prompt } = composeSceneImagePrompt(BRAND_PROFILE, { ...job, visualDescription: long, shotNotes: null })
-    expect(prompt.length).toBeLessThanOrEqual(2995)
+    expect(prompt.length).toBeLessThanOrEqual(PROMPT_LIMITS.sceneImage)
     expect(prompt).toContain('Recurring people')
   })
 })
@@ -1445,35 +1504,11 @@ describe('aspect-ratio framing on video scene stills', () => {
   })
 })
 
-describe('composeSceneVideoPrompt — headcount (job a64ab879 grew a second mother)', () => {
-  const base = { visualDescription: 'A mother and son walk home.', shotNotes: null, unitPresence: 'featured' as const }
-
-  it('names the exact number of people when the plan gives a count', () => {
-    expect(composeSceneVideoPrompt({ ...base, peopleCount: 2 })).toContain('exactly 2 people')
-    expect(composeSceneVideoPrompt({ ...base, peopleCount: 1 })).toContain('exactly 1 person:')
-  })
-
-  it('is unchanged when the count is missing or not a sane integer', () => {
-    const plain = composeSceneVideoPrompt(base)
-    for (const bad of [undefined, 0, -1, 2.5, 99, Number.NaN]) {
-      expect(composeSceneVideoPrompt({ ...base, peopleCount: bad as number })).toBe(plain)
-    }
-    expect(plain).toContain('preserve every person, limb, and object exactly as shown and add nothing new.')
-  })
-
-  it('still fits the sceneVideo prompt cap with a long description', () => {
-    const long = 'A mother and her son walk along a quiet street at dusk. '.repeat(60)
-    const prompt = composeSceneVideoPrompt({ ...base, visualDescription: long, shotNotes: long, peopleCount: 2, isFinalScene: true })
-    expect(prompt.length).toBeLessThanOrEqual(2450)
-    expect(prompt).toContain('exactly 2 people')
-  })
-})
-
 describe('app phone rules (job f63f3f5c: screens on both sides, red/green UI)', () => {
   it('say one screen on the front only, in image and video clauses', () => {
     expect(BRAND_PROFILE.appUi!.imageClause).toMatch(/One screen, on the phone's front only/)
     expect(BRAND_PROFILE.appUi!.videoClause).toContain('one screen')
-    expect(BRAND_PROFILE.appUi!.videoClause).toMatch(/never red, green/)
+    expect(BRAND_PROFILE.appUi!.videoClause).toMatch(/white background, maroon header/)
   })
   it('still fit the video prompt cap with the app clause and a long description', () => {
     const long = 'Close-up of a woman scanning a QR code with her phone. '.repeat(60)
@@ -1481,7 +1516,6 @@ describe('app phone rules (job f63f3f5c: screens on both sides, red/green UI)', 
       visualDescription: long,
       shotNotes: long,
       unitPresence: 'featured',
-      peopleCount: 2,
       isFinalScene: true,
       appUiVideoClause: BRAND_PROFILE.appUi!.videoClause,
       sceneGuardVideoClause: BRAND_PROFILE.sceneGuard!.video,
@@ -1541,12 +1575,53 @@ describe('exterior reference photos by view', () => {
   })
 })
 
+describe('composeSceneVideoPrompt — AI-written motion line', () => {
+  const base = { visualDescription: 'The worker walks to the office with an apple.', shotNotes: 'wide tracking shot', unitPresence: 'none' as const }
+  const motion = 'Over eight seconds, the worker takes one slow step and smiles. Everything else holds still.'
+
+  it('replaces the scene text and the long boilerplate with the motion line plus a compact tail', () => {
+    const out = composeSceneVideoPrompt({ ...base, motion })
+    expect(out.startsWith(motion)).toBe(true)
+    expect(out).not.toContain('The worker walks to the office')
+    expect(out).not.toContain('wide tracking shot')
+    expect(out).not.toContain('three distinct layers')
+    expect(out).toContain('Locked-off, static camera.')
+    expect(out).toContain('Everyone stays on one side of the doorway')
+    expect(out.length).toBeLessThan(800)
+  })
+
+  it('keeps the unit design lock and wordmark clause only when the unit is in frame', () => {
+    expect(composeSceneVideoPrompt({ ...base, motion })).not.toContain('Keep the brand wordmark')
+    const withUnit = composeSceneVideoPrompt({ ...base, motion, unitPresence: 'featured' })
+    expect(withUnit).toContain('Keep the brand wordmark identical and legible in every frame.')
+    expect(withUnit).toContain("exact silhouette")
+  })
+
+  it('still appends the app/scene-guard clauses and the final-scene settle', () => {
+    const out = composeSceneVideoPrompt({
+      ...base,
+      motion,
+      isFinalScene: true,
+      appUiVideoClause: ' APP-CLAUSE.',
+      sceneGuardVideoClause: ' GUARD-CLAUSE.',
+    })
+    expect(out).toContain('APP-CLAUSE.')
+    expect(out).toContain('GUARD-CLAUSE.')
+    expect(out).toContain('This is the FINAL shot')
+  })
+
+  it('without a motion line it is the unchanged scene-text prompt', () => {
+    const out = composeSceneVideoPrompt(base)
+    expect(out.startsWith('The worker walks to the office with an apple. wide tracking shot')).toBe(true)
+  })
+})
+
 describe('composeSceneVideoPrompt — no repeating background', () => {
   it('always tells the video model not to scroll or loop the backdrop, and still fits the cap', () => {
     const long = 'x '.repeat(1500)
     for (const visualDescription of ['A woman walks to the truck', long]) {
       const out = composeSceneVideoPrompt({ visualDescription, shotNotes: 'Slow push-in', unitPresence: 'featured' } as never)
-      expect(out).toContain('no replayed motion')
+      expect(out).toContain('each motion plays out once')
       expect(out.length).toBeLessThanOrEqual(2450)
     }
   })

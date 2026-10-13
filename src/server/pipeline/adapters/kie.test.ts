@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { KieImageGenerator, KieVideoGenerator } from './kie'
+import { KieImageGenerator, KieSceneImageGenerator, KieVideoGenerator } from './kie'
 import { ProviderCallError } from './types'
 
 function mockFetch(response: Partial<Response> & { jsonBody?: unknown; textBody?: string }) {
@@ -233,5 +233,28 @@ describe('KieVideoGenerator (Seedance 1.5 Pro image-to-video — docs.kie.ai/mar
     const fetchImpl = mockFetch({ ok: false, status: 404, textBody: 'Task not found' })
     const gen = new KieVideoGenerator('test-key', fetchImpl)
     await expect(gen.poll({ providerRef: 'task_1' })).rejects.toThrow(ProviderCallError)
+  })
+})
+
+// KIE.ai reports poll errors as HTTP 200 with the error in the body. Before
+// the envelope check, these parsed as "no state yet" and polled as 'pending'
+// until our own timer expired (2026-10-12: a scene image "timed out" 5 times).
+describe.each([
+  ['KieImageGenerator', (f: typeof fetch) => new KieImageGenerator('k', f)],
+  ['KieSceneImageGenerator', (f: typeof fetch) => new KieSceneImageGenerator('k', f)],
+  ['KieVideoGenerator', (f: typeof fetch) => new KieVideoGenerator('k', f)],
+])('%s poll() error envelope', (_name, make) => {
+  it('returns failed on HTTP 200 with body code 422 (task does not exist)', async () => {
+    const gen = make(mockFetch({ jsonBody: { code: 422, msg: 'The record does not exist', data: null } }))
+    const result = await gen.poll({ providerRef: 'gone' })
+    expect(result).toMatchObject({ status: 'failed' })
+    expect((result as { detail: string }).detail).toContain('The record does not exist')
+  })
+
+  it('throws a status-less ProviderCallError on any other non-200 body code (transient, re-polled)', async () => {
+    const gen = make(mockFetch({ jsonBody: { code: 500, msg: 'server busy', data: null } }))
+    const err = await gen.poll({ providerRef: 't' }).catch((e) => e)
+    expect(err).toBeInstanceOf(ProviderCallError)
+    expect(err.httpStatus).toBeNull()
   })
 })

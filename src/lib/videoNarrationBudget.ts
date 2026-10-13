@@ -48,3 +48,48 @@ export function maxNarrationWords(targetDurationMs: number, wordsPerSecond = NAR
 export function narrationWordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
+
+// Word band for a scene's SPOKEN narration, derived from the scene's slot.
+// Moved here from localizeScript.ts (still re-exported there) so the dashboard
+// editor, the edit route and the narration writer all use one definition.
+// MIN_FILL/MAX_FILL: a video's length is the sum of its scenes' real narration
+// lengths, so a scene far under its slot shrinks the video; MAX is kept at
+// 1.05 because an overshoot triggers a paid ElevenLabs resynthesis in
+// transcribeAudio.ts.
+export const MIN_FILL = 0.85
+export const MAX_FILL = 1.05
+
+export function narrationWordRange(
+  targetDurationMs: number,
+  wordsPerSecond = NARRATION_WORDS_PER_SECOND,
+): { min: number; max: number } {
+  const seconds = targetDurationMs / 1000
+  return {
+    min: Math.max(1, Math.ceil(seconds * wordsPerSecond * MIN_FILL)),
+    max: Math.max(1, Math.floor(seconds * wordsPerSecond * MAX_FILL)),
+  }
+}
+
+/** The approved/draft spoken narration stored on a scene (narration_intent.narration,
+ *  English), or '' when none was written yet (legacy drafts). */
+export function readSceneNarration(narrationIntent: unknown): string {
+  if (!narrationIntent || typeof narrationIntent !== 'object') return ''
+  const v = (narrationIntent as Record<string, unknown>).narration
+  return typeof v === 'string' ? v : ''
+}
+
+/** The word band stored with the narration when it was written (so the editor
+ *  and the server enforce the voice's real rate), else the default-rate band. */
+export function readSceneNarrationLimit(
+  narrationIntent: unknown,
+  targetDurationMs: number,
+): { min: number; max: number } {
+  if (narrationIntent && typeof narrationIntent === 'object') {
+    const l = (narrationIntent as Record<string, unknown>).narration_limit
+    if (l && typeof l === 'object') {
+      const { min, max } = l as { min?: unknown; max?: unknown }
+      if (typeof min === 'number' && typeof max === 'number' && max >= 1) return { min, max }
+    }
+  }
+  return narrationWordRange(targetDurationMs)
+}

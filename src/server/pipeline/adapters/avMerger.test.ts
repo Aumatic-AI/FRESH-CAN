@@ -128,15 +128,16 @@ describe('buildMuxCommand', () => {
     expect(outputExtension).toBe('mp4')
   })
 
-  it('fades video and audio to black/silence over the last 0.6s of the real total duration — regression for a real render ending abruptly, mid-motion', () => {
+  it('fades video and audio to black/silence over the last 0.6s of the tail added after the real total duration — regression for a real render ending abruptly, mid-motion', () => {
     const { fullCommand } = buildMuxCommand('https://example.com/video.mp4', 'https://example.com/audio.mp4', 10)
-    expect(fullCommand).toContain('fade=t=out:st=9.40:d=0.60')
-    expect(fullCommand).toContain('afade=t=out:st=9.40:d=0.60')
+    expect(fullCommand).toContain('fade=t=out:st=10.20:d=0.60')
+    expect(fullCommand).toContain('afade=t=out:st=10.20:d=0.60')
   })
 
-  it('never fades before 0 even for a total duration shorter than the fade window', () => {
-    const { fullCommand } = buildMuxCommand('https://example.com/video.mp4', 'https://example.com/audio.mp4', 0.3)
-    expect(fullCommand).toContain('st=0.00')
+  it('holds the last frame and pads the audio with a silent tail so the fade never lands on narration', () => {
+    const { fullCommand } = buildMuxCommand('https://example.com/video.mp4', 'https://example.com/audio.mp4', 10)
+    expect(fullCommand).toContain('tpad=stop_mode=clone:stop_duration=0.80,fade=t=out:st=10.20')
+    expect(fullCommand).toContain('apad=pad_dur=0.80,afade=t=out:st=10.20')
   })
 
   it('never contains a semicolon or filter_complex (single -vf/-af each, no filtergraph)', () => {
@@ -167,8 +168,8 @@ describe('buildMuxCommandCapped', () => {
       10,
     )
     expect(files).toEqual(['https://example.com/video.mp4', 'https://example.com/audio.mp4'])
-    expect(fullCommand).toContain('fade=t=out:st=9.40:d=0.60')
-    expect(fullCommand).toContain('afade=t=out:st=9.40:d=0.60')
+    expect(fullCommand).toContain('fade=t=out:st=10.20:d=0.60')
+    expect(fullCommand).toContain('afade=t=out:st=10.20:d=0.60')
     expect(outputExtension).toBe('mp4')
   })
 
@@ -639,7 +640,7 @@ describe('UploadPostAVMerger', () => {
     const body = JSON.parse(capturedBody!)
     expect(body.files).toEqual(['https://example.com/v.mp4', 'https://example.com/a.mp4'])
     expect(body.full_command).not.toContain(';')
-    expect(body.full_command).toContain('fade=t=out:st=9.40:d=0.60')
+    expect(body.full_command).toContain('fade=t=out:st=10.20:d=0.60')
     expect(body.full_command).toContain(`-crf ${INTERMEDIATE_CRF}`)
   })
 

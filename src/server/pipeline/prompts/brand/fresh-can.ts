@@ -121,6 +121,21 @@ export const BRAND_PROFILE: BrandProfile = {
       'double door flush at bumper height, reached straight from the ground — which is the only entrance and ' +
       'the only place customers are ever served.',
 
+    // Same rules as `full`, said once each (job d289e3af: `full` plus the
+    // reference photo's description repeated the wordmark and door rules).
+    sceneCompact:
+      'The Fresh-CAN mobile grocery store: a white box truck with a deep maroon (#6B1A1A) steel cargo container ' +
+      'mounted on back; the cab is plain white and unbranded. The white "Fresh [maple leaf icon] CAN" wordmark, ' +
+      'never distorted, appears once, centered, on each of the two side panels and nowhere else. The front face ' +
+      'and both side panels are solid, unbroken maroon steel with no opening; the rear face holds the only ' +
+      'opening, a black-frame glass double door flush at bumper height, plus one small white square QR panel ' +
+      'beside it and no wordmark. That door is the only entrance and the only place customers are served. ' +
+      'Never place the wordmark or logo on any other vehicle or object.',
+
+    proportions:
+      'The container is long and low, roughly twice as long as it is tall — never a cube or a tall box — and ' +
+      'the white cab and the wheels are always visible.',
+
     interior:
       'The interior of the Fresh-CAN mobile grocery store: a narrow aisle inside the shipping container ' +
       'with light grey wood-look laminate flooring and bright overhead fluorescent lighting. Black wire ' +
@@ -180,8 +195,8 @@ export const BRAND_PROFILE: BrandProfile = {
   sceneGuard: {
     image: 'Self-serve store, not a market: no staff serving, no crates or produce outside.',
     video:
-      ' Self-serve and cashierless: never show staff serving, hand-overs of goods, outdoor produce stands, or ' +
-      'a service window.',
+      ' Self-serve and cashierless: customers pick up their own items from the shelves inside; all goods ' +
+      'stay in the store.',
   },
   appUi: {
     imageClause:
@@ -190,12 +205,12 @@ export const BRAND_PROFILE: BrandProfile = {
       'phone\'s front only.',
     videoClause:
       ' Any phone screen showing the Fresh-CAN app stays strictly maroon (#6B1A1A) and white in every frame — ' +
-      'never red, green or any other UI color. The phone has one screen, on its front only; its plain back faces ' +
-      'what is scanned.',
+      'white background, maroon header, buttons and icons. The phone has one screen, on its ' +
+      'front only; its plain back faces what is scanned.',
   },
   // How the speech-to-text step tends to mis-hear the brand's second word
   // (real job f63f3f5c captioned "Fresh Khan"); used only to repair captions.
-  asrMishearings: ['khan', 'kan', 'kahn', 'cann', 'cahn'],
+  asrMishearings: ['khan', 'kan', 'kahn', 'cann', 'cahn', 'kans', 'kansis', 'cans', 'cansis'],
   ctaBarColorDescriptor: 'a solid charcoal-black band, similar to hex #1F1F1F',
 
   // Fallback ONLY — real ElevenLabs voice IDs, used by synthesizeVoice.ts

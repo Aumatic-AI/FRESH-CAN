@@ -6,6 +6,7 @@ import type {
   SceneClipScaler,
   ImageValidator,
   ClipValidator,
+  ClipMotionWriter,
   ImageValidationResult,
 } from '../../adapters/types'
 import { ProviderCallError } from '../../adapters/types'
@@ -33,6 +34,7 @@ import { pickClipDurationSeconds } from '../../lib/sceneClipDuration'
 import { effectiveSlotMs, plannedSlotMs } from '../../lib/effectiveSceneDuration'
 import { parseMp4DurationSeconds } from '../../lib/mp4Duration'
 import { extractClipFrames } from '../../lib/clipFrames'
+import { lintClipMotion } from '../../lib/clipMotion'
 import {
   BRAND_PROFILE,
   composeSceneImagePrompt,
@@ -251,12 +253,6 @@ const VALIDATION_RETRY_PREFIX = 'VALIDATION_RETRY:'
 // issue still present — those regenerations bought nothing. One targeted
 // retry, then accept.
 const MAX_VALIDATION_RETRIES = 1
-// A wrong headcount (extra person, duplicate, a reflected figure) is the defect
-// the video model turns into a second man mid-clip (jobs e31d325e, 369ff9de), and
-// the one a second attempt most often fixes, so it alone gets one more paid
-// regeneration. Every other validation issue keeps the single retry above.
-const MAX_PERSON_VALIDATION_RETRIES = 2
-
 // A collage still (several photos stacked in one frame) is rejected by a free,
 // local check (lib/panelDetect.ts) rather than the vision gate. It, the truck
 // door/vent check and the third-party-brand check all share the SAME single
@@ -284,19 +280,6 @@ export function isThirdPartyBrandIssue(issue: string): boolean {
 // a clip — a regeneration is another paid KIE clip. Set CLIP_VALIDATION=off to
 // skip the check (no ffmpeg, no vision call).
 
-/** The validator's headcount finding (adapters/openai.ts's
- *  HEADCOUNT_VALIDATION_CLAUSE): an edit rarely removes a duplicated person
- *  cleanly, so the retry regenerates from scratch with an explicit count. */
-export function isExtraPersonIssue(issue: string): boolean {
-  return /more people than planned|duplicated person/i.test(issue)
-}
-
-/** How many validation-driven regenerations a failed image may use: 2 when every
- *  reported issue is a headcount problem, else 1. */
-export function validationRetryBudget(issues: readonly string[]): number {
-  return issues.length > 0 && issues.every(isExtraPersonIssue) ? MAX_PERSON_VALIDATION_RETRIES : MAX_VALIDATION_RETRIES
-}
-
 export function isCollageIssue(issue: string): boolean {
   return /collage|split[- ]?screen|multi[- ]?panel|stacked (?:panel|image|photo)|grid of (?:photo|image)/i.test(issue)
 }
@@ -320,16 +303,11 @@ interface RejectedImageSnapshot {
  *  regenerate the entire creative concept from scratch"). Reuses
  *  composeSceneImagePrompt's existing regenInstructions channel, so this is
  *  the ONLY new prompt content a validation-triggered retry adds. */
-export function buildCorrectionInstruction(issues: string[], expectedPeople?: number): string {
+export function buildCorrectionInstruction(issues: string[]): string {
   // An edit cannot undo a collage, so this regenerates from scratch with the
   // single-frame instruction instead of "preserve everything else".
   if (issues.some(isCollageIssue)) {
     return 'Render ONE single continuous photograph filling the whole frame — never a collage, split-screen, or stacked panels.'
-  }
-  if (issues.some(isExtraPersonIssue)) {
-    return typeof expectedPeople === 'number' && expectedPeople >= 1
-      ? `Exactly ${expectedPeople} ${expectedPeople === 1 ? 'person appears' : 'different people appear'} in the frame, each shown once; no duplicate, twin or extra person anywhere, including the background and any reflection in glass.`
-      : 'Each person appears exactly once; no duplicate, twin or extra person anywhere, including the background and any reflection in glass.'
   }
   if (issues.some(isThirdPartyBrandIssue)) {
     return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
@@ -535,14 +513,6 @@ async function runSceneImageStep(
       // runSceneVideoClipStep is even called) is what actually enforces
       // "before video generation" here; this function just has to avoid
       // marking the asset 'ready' until validation says so.
-      // The plan's headcount for this scene (generateScript.ts repairs it to be
-      // at least the cast listed as present); an invalid/missing value skips the
-      // headcount check entirely.
-      const rawPeople = extractVisualState(scene.narration_intent)?.people
-      const plannedPeople =
-        typeof rawPeople === 'number' && Number.isInteger(rawPeople) && rawPeople >= 1 && rawPeople <= 8
-          ? rawPeople
-          : undefined
       let validation: ImageValidationResult = { pass: true, issues: [] }
       // Free local collage check first; a collage skips the paid vision call.
       const collage = await isStackedPanelCollageUrl(permanentUrl)
@@ -555,7 +525,6 @@ async function runSceneImageStep(
             shotNotes: scene.shot_notes,
             // An interior scene shows no truck exterior, so the truck-structure
             // check would only misfire (real job a64ab879 scene 2).
-            expectedPeople: plannedPeople,
             unitView: extractSceneLayer2Fields(scene.narration_intent).unit_view,
             unitPresence: (() => {
               const l2 = extractSceneLayer2Fields(scene.narration_intent)
@@ -573,7 +542,7 @@ async function runSceneImageStep(
 
       // Only queried on a rejection — the common (passing) path costs no
       // extra DB round-trip.
-      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isExtraPersonIssue(i))
+      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i))
       const validationRetriesUsed = validation.pass
         ? 0
         : await countFailedStepAttemptsWithPrefix(
@@ -586,7 +555,7 @@ async function runSceneImageStep(
 
       if (
         !validation.pass &&
-        validationRetriesUsed < validationRetryBudget(validation.issues) &&
+        validationRetriesUsed < MAX_VALIDATION_RETRIES &&
         !hasExceededMaxAttempts(attemptNumber, MAX_ATTEMPTS.kie)
       ) {
         // Targeted regeneration (request #6) — reject this image and let
@@ -611,7 +580,7 @@ async function runSceneImageStep(
           attemptNumber,
           status: 'failed_retryable',
           provider: 'openai',
-          errorMessage: `${VALIDATION_RETRY_PREFIX}${buildCorrectionInstruction(validation.issues, plannedPeople)}`,
+          errorMessage: `${VALIDATION_RETRY_PREFIX}${buildCorrectionInstruction(validation.issues)}`,
           // No rejectedImageUrl for a collage: that would route the next attempt
           // into edit mode, which cannot fix it — omitting it makes the retry
           // regenerate from scratch with the correction instruction instead.
@@ -741,6 +710,7 @@ async function runSceneVideoClipStep(
   aspectRatio: '9:16' | '1:1' | '16:9' = '9:16',
   plan: ScenePlanContext = {},
   clipValidator?: ClipValidator,
+  motionWriter?: ClipMotionWriter,
 ): Promise<boolean> {
   const generation = pipeline.current_generation
   const alreadySucceeded = await hasSucceededStep(
@@ -769,6 +739,9 @@ async function runSceneVideoClipStep(
   // this way (3 attempts x 6 scenes, every single one failing on the exact
   // same "downscale poll timed out") before being cancelled.
   let rawUrl: string | undefined
+  // The AI-written motion line used for THIS attempt's submission, kept in the
+  // succeeded step's snapshot so a bad clip can be traced to its prompt.
+  let motionLine: string | undefined
   // Set only when a downscale job was already submitted (and billed, though
   // upload-post.com's downscale is unbilled today) and left unresolved by a
   // previous attempt — same "provider_ref set + status still 'generating'"
@@ -853,10 +826,29 @@ async function runSceneVideoClipStep(
         // in it — same source (scene.narration_intent) runSceneImageStep
         // already reads for the still-image step, no new DB read.
         const layer2 = extractSceneLayer2Fields(scene.narration_intent)
+        const durationSeconds = pickClipDurationSeconds(plannedSlotMs(scene.narration_intent, scene.target_duration_ms))
+        // A short motion-only line written from the approved still (the video
+        // model already sees the still, so the scene text is not repeated).
+        // Any failure or a line that fails the lint falls back to the
+        // deterministic scene-text prompt, so this can never block a clip.
+        if (motionWriter && process.env.CLIP_MOTION_PROMPT !== 'off') {
+          try {
+            const written = await motionWriter.write({
+              stillUrl: sceneImageUrl,
+              visualDescription: scene.visual_description,
+              shotNotes: scene.shot_notes,
+              durationSeconds,
+            })
+            motionLine = lintClipMotion(written) ?? undefined
+            if (!motionLine) console.log(`[${stepName}] motion line rejected by lint, using the scene-text prompt: ${String(written).slice(0, 160)}`)
+          } catch (motionErr) {
+            console.warn(`[${stepName}] motion writer failed, using the scene-text prompt:`, motionErr)
+          }
+        }
         const prompt = composeSceneVideoPrompt({
+          motion: motionLine,
           visualDescription: scene.visual_description,
           shotNotes: scene.shot_notes,
-          peopleCount: extractVisualState(scene.narration_intent)?.people,
           isFinalScene,
           look: plan.look,
           unitPresence: layer2.unit_presence,
@@ -868,7 +860,7 @@ async function runSceneVideoClipStep(
         jobRef = await videoGenerator.submit({
           prompt,
           referenceImageUrl: sceneImageUrl,
-          durationSeconds: pickClipDurationSeconds(plannedSlotMs(scene.narration_intent, scene.target_duration_ms)),
+          durationSeconds,
           aspectRatio,
         })
 
@@ -1028,15 +1020,11 @@ async function runSceneVideoClipStep(
         const frames = await extractClipFrames(scaleOutcome.fileBuffer)
         if (frames.length > 0) {
           const l2 = extractSceneLayer2Fields(scene.narration_intent)
-          const rawPeople = extractVisualState(scene.narration_intent)?.people
-          const people =
-            typeof rawPeople === 'number' && Number.isInteger(rawPeople) && rawPeople >= 1 && rawPeople <= 8 ? rawPeople : undefined
           const verdict = await clipValidator.validate({
             stillUrl: sceneImageUrl,
             frames,
             visualDescription: scene.visual_description,
             shotNotes: scene.shot_notes,
-            expectedPeople: people,
             unitPresence: l2.setting === 'interior' ? 'none' : l2.unit_presence,
           })
           clipCheckIssues = verdict.issues
@@ -1090,7 +1078,11 @@ async function runSceneVideoClipStep(
       attemptNumber,
       status: 'succeeded',
       provider: 'kie',
-      outputSnapshot: { fileUrl: permanentUrl, ...(clipCheckIssues?.length ? { clipCheckIssues } : {}) },
+      outputSnapshot: {
+        fileUrl: permanentUrl,
+        ...(clipCheckIssues?.length ? { clipCheckIssues } : {}),
+        ...(motionLine ? { motionPrompt: motionLine } : {}),
+      },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1242,6 +1234,10 @@ export async function runGenerateSceneVisual(
   /** Optional vision check of finished clips — see ClipValidator. Omitted by
    *  every existing test, which keeps their exact prior behavior. */
   clipValidator?: ClipValidator,
+  /** Optional writer of the short motion-only clip prompt (see ClipMotionWriter).
+   *  Omitted by every existing test, which keeps their exact prior behavior;
+   *  CLIP_MOTION_PROMPT=off disables it at runtime. */
+  motionWriter?: ClipMotionWriter,
 ): Promise<{ ran: boolean }> {
   if (pipeline.status !== 'generating') return { ran: false }
 
@@ -1304,6 +1300,7 @@ export async function runGenerateSceneVisual(
           aspectRatio,
           plan,
           clipValidator,
+          motionWriter,
         )
       }
     }

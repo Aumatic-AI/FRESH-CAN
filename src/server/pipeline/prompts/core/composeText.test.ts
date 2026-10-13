@@ -725,6 +725,11 @@ describe('composeLocalizeScriptSystemPrompt', () => {
     expect(prompt).toContain('never as scripted ad copy or a voiceover that sounds like a commercial')
   })
 
+  it('tells the narration writer to use the brand name as a plain standalone name, never possessive', () => {
+    const prompt = composeLocalizeScriptSystemPrompt(testBrand, { language: 'English' })
+    expect(prompt).toContain(`exactly as "${testBrand.name}", as a plain standalone name: never possessive`)
+  })
+
   it('carves out an exception so a required brand-name mention survives localization instead of being softened out by the anti-ad-copy rule — regression for this step having zero awareness of composeVideoScriptSystemPrompt\'s CAMPAIGN_FIT requirement, since it only ever receives narration_intent, never the reasoning behind it', () => {
     const prompt = composeLocalizeScriptSystemPrompt(testBrand, { language: 'French' })
     expect(prompt).toContain(`if a narration_intent explicitly calls for naming ${testBrand.name}`)

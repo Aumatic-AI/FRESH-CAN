@@ -12,9 +12,9 @@ import StatusBadge from '@/components/StatusBadge'
 import LanguageToggle, { LANG_LABELS } from '@/components/LanguageToggle'
 import type { ScriptPart } from '@/components/dashboard/ScriptPartCard'
 import { supabase } from '@/lib/supabase'
-import { maxNarrationWords, narrationWordCount } from '@/lib/videoNarrationBudget'
 import { useContentJobStore } from '@/stores/contentJobStore'
 import { useNewContentStore } from '@/stores/newContentStore'
+import { narrationWordCount, readSceneNarration, readSceneNarrationLimit } from '@/lib/videoNarrationBudget'
 import {
   AlertCircle,
   CheckCircle2,
@@ -589,10 +589,10 @@ function statusBadgeVariant(status: string): 'gray' | 'amber' | 'blue' | 'green'
 // own doc comment) — every scene generate_script writes always has a `text`
 // field (generateScript.ts's runGenerateScript), so this only ever falls
 // back to '' for a shape that shouldn't exist in practice.
+// The spoken English narration written at draft time (narration_intent.narration);
+// '' for a legacy draft that has none yet.
 function sceneNarrationText(narrationIntent: unknown): string {
-  if (!narrationIntent || typeof narrationIntent !== 'object') return ''
-  const text = (narrationIntent as Record<string, unknown>).text
-  return typeof text === 'string' ? text : ''
+  return readSceneNarration(narrationIntent)
 }
 
 function MiniStatusBadge({ status }: { status: string }) {
@@ -608,6 +608,41 @@ function MiniStatusBadge({ status }: { status: string }) {
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${classes[variant]}`}>
       {status.replace(/_/g, ' ')}
     </span>
+  )
+}
+
+function ResumeProductionButton({ jobId }: { jobId: string }) {
+  // Self-contained like VideoTrackCard's retry: the resume route flips the
+  // pipeline back to 'generating' server-side
+  // (src/app/api/jobs/[jobId]/video/resume/route.ts) and this page's own
+  // videoStatus poll picks that up on its next tick.
+  const [resuming, setResuming] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+
+  const handleResume = async () => {
+    setResuming(true)
+    setResumeError(null)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/video/resume`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Resume failed (status ${res.status})`)
+      }
+    } catch (err) {
+      setResumeError(err instanceof Error ? err.message : 'Resume failed')
+    } finally {
+      setResuming(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button variant="outline" size="sm" onClick={handleResume} disabled={resuming}>
+        <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${resuming ? 'animate-spin' : ''}`} />
+        {resuming ? 'Resuming…' : 'Resume'}
+      </Button>
+      {resumeError && <p className="text-xs text-red-600">{resumeError}</p>}
+    </div>
   )
 }
 
@@ -716,18 +751,17 @@ function VideoTabContent({
     .filter((s) => editedNarration[s.id] !== undefined && editedNarration[s.id] !== sceneNarrationText(s.narration_intent))
     .map((s) => s.id)
 
-  // Mirrors the exact budget updateScript.ts's applyScriptEdits enforces
-  // server-side (same lib/videoNarrationBudget functions) — this is a live
-  // UX guardrail, not a second, possibly-diverging limit; the server call
-  // below is still the authoritative gate.
-  const overBudgetSceneIds = new Set(
-    scenes
-      .filter((s) => narrationWordCount(editedNarration[s.id] ?? '') > maxNarrationWords(s.target_duration_ms))
-      .map((s) => s.id),
-  )
+  const narrationOf = (s: (typeof scenes)[number]) => editedNarration[s.id] ?? sceneNarrationText(s.narration_intent)
+  const limitOf = (s: (typeof scenes)[number]) => readSceneNarrationLimit(s.narration_intent, s.target_duration_ms)
+  const overLimitSceneIds = scenes
+    .filter((s) => narrationWordCount(narrationOf(s)) > limitOf(s).max)
+    .map((s) => s.id)
+  const totalWords = scenes.reduce((sum, s) => sum + narrationWordCount(narrationOf(s)), 0)
+  const totalMaxWords = scenes.reduce((sum, s) => sum + limitOf(s).max, 0)
+  const liveScript = scenes.map((s) => narrationOf(s).trim()).filter(Boolean).join('\n\n')
 
   const handleSaveScript = async () => {
-    if (dirtySceneIds.length === 0 || overBudgetSceneIds.size > 0) return
+    if (dirtySceneIds.length === 0) return
     setSavingScript(true)
     setScriptSaveError(null)
     try {
@@ -800,11 +834,24 @@ function VideoTabContent({
 
       {isPreApproval ? (
         <>
-          {draftData?.script && (
+          {(liveScript || draftData?.script) && (
             <Card>
               <CardContent className="space-y-1 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Script</p>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{draftData.script}</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Narration script</p>
+                  {liveScript && (
+                    <p className={`text-xs ${totalWords > totalMaxWords ? 'text-red-600' : 'text-gray-400'}`}>
+                      {totalWords} / {totalMaxWords} words max
+                    </p>
+                  )}
+                </div>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-800">{liveScript || draftData?.script}</p>
+                {liveScript && (
+                  <p className="pt-1 text-xs text-gray-400">
+                    This is exactly what will be spoken. Edit it per scene below; each scene has a word limit that keeps
+                    the video within its length.
+                  </p>
+                )}
               </CardContent>
             </Card>
           )}
@@ -827,13 +874,13 @@ function VideoTabContent({
           )}
           <div className="space-y-2">
             {scenes.map((scene) => {
-              const narrationText = editedNarration[scene.id] ?? sceneNarrationText(scene.narration_intent)
-              const wordCount = narrationWordCount(narrationText)
-              const maxWords = maxNarrationWords(scene.target_duration_ms)
-              const overBudget = overBudgetSceneIds.has(scene.id)
-              const nearBudget = !overBudget && wordCount >= maxWords * 0.85
+              const narrationText = narrationOf(scene)
+              const limit = limitOf(scene)
+              const words = narrationWordCount(narrationText)
+              const tooLong = words > limit.max
+              const tooShort = words > 0 && words < limit.min
               return (
-                <Card key={scene.id} className={`border-gray-200 ${overBudget ? 'border-red-300' : ''}`}>
+                <Card key={scene.id} className="border-gray-200">
                   <CardContent className="space-y-2 p-4">
                     <div className="mb-1 flex items-center justify-between">
                       <p className="text-xs font-semibold text-gray-500">Scene {scene.scene_number}</p>
@@ -843,27 +890,20 @@ function VideoTabContent({
                     {scene.shot_notes && <p className="text-xs text-gray-400">{scene.shot_notes}</p>}
                     <div>
                       <div className="mb-1 flex items-center justify-between">
-                        <label className="block text-xs font-medium text-gray-500">Narration</label>
-                        <p
-                          className={`text-xs ${
-                            overBudget ? 'font-medium text-red-600' : nearBudget ? 'text-amber-600' : 'text-gray-400'
-                          }`}
-                        >
-                          {wordCount}/{maxWords} words
-                        </p>
+                        <label className="block text-xs font-medium text-gray-500">Narration (spoken)</label>
+                        <span className={`text-xs ${tooLong ? 'font-medium text-red-600' : tooShort ? 'text-amber-600' : 'text-gray-400'}`}>
+                          {words} words · limit {limit.max}
+                          {tooLong ? ' — too long' : tooShort ? ` — aim for ${limit.min}+ to fill the scene` : ''}
+                        </span>
                       </div>
                       <Textarea
                         value={narrationText}
                         onChange={(e) => setEditedNarration((prev) => ({ ...prev, [scene.id]: e.target.value }))}
                         rows={2}
+                        placeholder="No narration written yet — type it here (within the word limit), or approve and it will be written automatically."
                         disabled={!isEditable || savingScript}
-                        className={`text-sm ${overBudget ? 'border-red-400 focus-visible:ring-red-400' : ''}`}
+                        className={`text-sm ${tooLong ? 'border-red-300' : ''}`}
                       />
-                      {overBudget && (
-                        <p className="mt-1 text-xs text-red-600">
-                          Too long for this scene&apos;s {Math.round(scene.target_duration_ms / 1000)}s — trim to {maxWords} words or fewer.
-                        </p>
-                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -876,7 +916,7 @@ function VideoTabContent({
                 variant="outline"
                 size="sm"
                 onClick={handleSaveScript}
-                disabled={savingScript || dirtySceneIds.length === 0 || overBudgetSceneIds.size > 0}
+                disabled={savingScript || dirtySceneIds.length === 0 || overLimitSceneIds.length > 0}
               >
                 {savingScript ? (
                   <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
@@ -886,7 +926,7 @@ function VideoTabContent({
                 Save script
               </Button>
               <p className="text-xs text-gray-400">
-                Save your narration edits before approving — scenes lock once generation starts.
+                Save your narration edits before approving — the approved narration is what gets spoken, and scenes lock once generation starts.
               </p>
             </div>
           )}
@@ -910,6 +950,9 @@ function VideoTabContent({
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {pipeline.status === 'failed' && pipeline.last_error !== 'Cancelled by user' && (
+                  <ResumeProductionButton jobId={job.id} />
+                )}
                 <MiniStatusBadge status={pipeline.status} />
               </div>
             </CardContent>

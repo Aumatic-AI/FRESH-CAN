@@ -5,25 +5,21 @@
 // in production today (not just what's defined) and the owner's own
 // confirmation of the numbers below.
 export const PROMPT_LIMITS = {
-  /** Originally measured against KieImageGenerator — KIE.ai's Flux Kontext
-   *  dedicated endpoint (/api/v1/flux/kontext/generate), used by video's
-   *  scene images AND character-ref through 2026-09-22. Confirmed live
-   *  error text: "The prompt word cannot exceed 3000 characters." A small
-   *  margin, not the ~100 chars an earlier pass used — see compose.ts's
-   *  own history for why a large margin costs real scene-content budget
-   *  on a fixed overhead that's already close to the cap. (KieSceneImageGenerator's
-   *  tighter, ~1300-char-observed Market endpoint cap is NOT reflected
-   *  here — that adapter was replaced in production on 2026-09-19
-   *  specifically because its real cap kept failing ordinary scenes; it's
-   *  dead code, not a live constraint.)
+  /** Budget for video scene-image and character-ref prompts, sent to
+   *  NanoBananaImageGenerator (nano-banana-2 on KIE.ai).
    *
-   *  Video's scene images/character-ref permanently moved to
-   *  NanoBananaImageGenerator on 2026-09-23 (adapters/nanoBanana.ts), which
-   *  has no documented prompt-length limit — this budget is kept as-is as
-   *  a conservative ceiling regardless, not loosened just because the new
-   *  model may not enforce one.
- */
-  sceneImage: 2995,
+   *  Raised 2995 -> 8000 on 2026-10-13. 2995 was measured against the old
+   *  Flux Kontext endpoint (confirmed live error: "The prompt word cannot
+   *  exceed 3000 characters."), which stopped being used on 2026-09-23.
+   *  nano-banana-2 has no documented prompt limit, and blog/image_post send
+   *  unbounded prompts to this same model without a length failure. At 2995
+   *  the ~2000-3100 chars of fixed brand text left almost nothing for the
+   *  scene: in job d289e3af shot notes were dropped in all 7 scenes, scene
+   *  descriptions were cut to 9-970 chars, and scene 5's scene block was
+   *  empty (docs/DEBUG_JOB_d289e3af.md), so stills came back with missing
+   *  legs, cropped people and a wrong truck. The cascade in
+   *  composeSceneImagePrompt still applies if a prompt ever exceeds this. */
+  sceneImage: 8000,
   /** KieVideoGenerator — Seedance 1.5 Pro. Documented at
    *  docs.kie.ai/market/bytedance/seedance-1-5-pro: `input.prompt` is
    *  3-2500 characters. */

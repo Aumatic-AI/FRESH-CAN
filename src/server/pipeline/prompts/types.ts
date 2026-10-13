@@ -199,6 +199,13 @@ export interface UnitDescriptor {
   /** The complete structural rule set — every face, every opening, what
    *  must never appear. Used when the unit is a featured subject. */
   full: string
+  /** Optional compact form of `full` (same rules, fewer characters; ends with
+   *  the no-other-vehicle rule). Used for featured-unit SCENE images when the
+   *  caller opts into compact fixed text. */
+  sceneCompact?: string
+  /** Optional one-sentence statement of the unit's proportions (long, low
+   *  container; cab and wheels always visible), appended when requested. */
+  proportions?: string
   /** Interior layout and fixtures. Used only for interior scenes. */
   interior: string
   /** The wordmark's own literal text, standalone — e.g. "Fresh CAN" — for

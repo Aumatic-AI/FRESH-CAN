@@ -275,7 +275,11 @@ function interiorBlock(brand: BrandProfile): string {
   return `${brand.unit.interior} The scene takes place INSIDE the store, never outside it.`
 }
 
-function unitBrandingBlock(brand: BrandProfile, presence: UnitPresence): string {
+function unitBrandingBlock(
+  brand: BrandProfile,
+  presence: UnitPresence,
+  options: { compact?: boolean; proportions?: boolean } = {},
+): string {
   if (presence === 'none') {
     return (
       `This scene does not involve the ${brand.name} unit — do not include it, its logo, or any ` +
@@ -290,12 +294,16 @@ function unitBrandingBlock(brand: BrandProfile, presence: UnitPresence): string 
   // scene content, so the consolidation keeps the RULES and drops the
   // connective framing.
   const noOtherVehicle = `Never place the ${brand.name} wordmark or logo on any other vehicle or object.`
+  const proportions = options.proportions && brand.unit.proportions ? ` ${brand.unit.proportions}` : ''
   if (presence === 'featured') {
-    return `${brand.unit.full} ${noOtherVehicle}`
+    // sceneCompact (when the brand has one) already ends with the
+    // no-other-vehicle rule, so it is not repeated.
+    if (options.compact && brand.unit.sceneCompact) return `${brand.unit.sceneCompact}${proportions}`
+    return `${brand.unit.full} ${noOtherVehicle}${proportions}`
   }
   return (
     `The ${brand.name} unit may appear here, but never as the compositional focus and never forced in. ` +
-    `If it appears: ${brand.unit.identity} ${noOtherVehicle}`
+    `If it appears: ${brand.unit.identity} ${noOtherVehicle}${proportions}`
   )
 }
 
@@ -834,6 +842,16 @@ interface SceneImageJob {
    *  time of day/palette instead of a hardcoded one that can contradict
    *  it. Omitted falls back to moodClause()'s default. */
   look?: VideoScriptLook | null
+  /** Opt-in compact fixed text (2026-10-13, prompt-length experiment): the
+   *  same rules in fewer characters — shorter look clause (time + lighting
+   *  only), tighter generic rules, the brand's own sceneCompact unit text, and
+   *  a one-line reference-photo note instead of restating the photo's
+   *  description. Off by default until the prompt A/B harness
+   *  (scripts/prompt-ab) shows it is no worse than the full text. */
+  compactFixedText?: boolean
+  /** Opt-in: append the brand's unit proportions sentence (long, low
+   *  container; cab and wheels always visible) wherever the unit is in frame. */
+  unitProportions?: boolean
 }
 
 // Per-field cap for plan-derived free text spliced into the scene prompts
@@ -854,6 +872,35 @@ export function sceneLookClause(look: VideoScriptLook | null | undefined): strin
   ].filter(Boolean)
   if (bits.length === 0) return moodClause()
   return `Visual look shared by every scene of this video: ${bits.join('; ')}.`
+}
+
+// Compact scene-image variants (job.compactFixedText). Each keeps the same
+// rule as its full counterpart above; only the wording is shorter.
+const SCENE_CONTENTS_RULE_COMPACT =
+  'Show only the people, objects, and setting this scene describes. Every visible hand belongs to one of them, ' +
+  'with natural anatomy; reflections never show an extra or ghostly figure.'
+const PHOTOREALISTIC_QUALITY_FLOOR_COMPACT =
+  'Premium photorealistic photography: natural detail, true-to-life skin, food and fabric — never oversharpened, ' +
+  'plastic-looking, or oversaturated.'
+const REFERENCE_IS_GUIDE_COMPACT =
+  "Use the reference photo only as a guide for the vehicle's shape, structure, and color; build a new scene " +
+  '(new background, framing, and people).'
+const SCENE_IS_CREATIVE_BRIEF_COMPACT =
+  "Brand details are constraints if they appear, never the reason the scene exists; the scene's own style governs."
+
+const REFERENCE_VIEW_LABEL: Record<UnitView, string> = {
+  side: 'a straight side profile',
+  rear34: 'a rear three-quarter view',
+  rear: 'a straight-on rear view',
+}
+
+/** time of day + lighting only: the palette and style_direction fields are
+ *  free script prose (often clothing or story talk) and made the full clause
+ *  ~500 chars, partly cut mid-word. */
+function sceneLookClauseCompact(look: VideoScriptLook | null | undefined): string {
+  const field = (v: string | undefined) => (v?.trim() ? truncateToFit(v.trim(), 70) : '')
+  const bits = [field(look?.time_of_day), look?.lighting?.trim() ? `${field(look.lighting)} lighting` : ''].filter(Boolean)
+  return bits.length === 0 ? moodClause() : `Look: ${bits.join('; ')}.`
 }
 
 /** Locked physical descriptions for the people in this scene — see
@@ -958,10 +1005,18 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     showSubject && !interiorRef && job.unitView && job.unitView !== 'side'
       ? pickExteriorByView(brand, job.unitView)
       : undefined
+  const compact = !!job.compactFixedText
   const viewClause = viewRef
-    ? `Reference photo: ${viewRef.whatItShows} The rear door stays closed and nobody stands in or at the doorway.`
+    ? compact
+      ? `The attached photo shows ${REFERENCE_VIEW_LABEL[job.unitView!]} of the truck; match its structure. ` +
+        'The rear door stays closed and nobody stands in or at the doorway.'
+      : `Reference photo: ${viewRef.whatItShows} The rear door stays closed and nobody stands in or at the doorway.`
     : ''
-  const look = sceneLookClause(job.look)
+  const look = compact ? sceneLookClauseCompact(job.look) : sceneLookClause(job.look)
+  const unitBlockOptions = { compact, proportions: !!job.unitProportions }
+  const contentsRule = compact ? SCENE_CONTENTS_RULE_COMPACT : SCENE_CONTENTS_RULE
+  const qualityFloor = compact ? PHOTOREALISTIC_QUALITY_FLOOR_COMPACT : PHOTOREALISTIC_QUALITY_FLOOR
+  const guideNotCopy = compact ? REFERENCE_IS_GUIDE_COMPACT : REFERENCE_IS_GUIDE_NOT_COPY
 
   // Everything below is a fixed brand/safety constraint sent in full,
   // always — see limits.ts's PROMPT_LIMITS.sceneImage for why these can
@@ -975,12 +1030,12 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   const fixedParts = [
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
-    SCENE_CONTENTS_RULE,
-    PHOTOREALISTIC_QUALITY_FLOOR,
+    contentsRule,
+    qualityFloor,
     aspectFramingClause(job.aspectRatio),
     appClause,
-    interiorRef ? interiorBlock(brand) : unitBrandingBlock(brand, unitPresence),
-    showSubject ? REFERENCE_IS_GUIDE_NOT_COPY : '',
+    interiorRef ? interiorBlock(brand) : unitBrandingBlock(brand, unitPresence, unitBlockOptions),
+    showSubject ? guideNotCopy : '',
     viewClause,
     showSubject ? brand.noNewTextInstruction : noTextVariantFor(brand, unitPresence),
   ].filter(Boolean)
@@ -1004,7 +1059,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // Generic meta-guidance (brand details are constraints, not the point):
   // useful, but never worth cutting the scene's own words for — it yields
   // right after the guard clause (Track C, 2026-10-08).
-  let creativeBrief = showSubject ? SCENE_IS_CREATIVE_BRIEF : ''
+  let creativeBrief = showSubject ? (compact ? SCENE_IS_CREATIVE_BRIEF_COMPACT : SCENE_IS_CREATIVE_BRIEF) : ''
 
   const totalLen = () =>
     fixedLen +
@@ -1089,8 +1144,8 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     // consistent across all of one video's scenes.
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
-    SCENE_CONTENTS_RULE,
-    PHOTOREALISTIC_QUALITY_FLOOR,
+    contentsRule,
+    qualityFloor,
     aspectFramingClause(job.aspectRatio),
     creativeBrief,
     appClause,
@@ -1102,14 +1157,14 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // true (never an empty-pool edge case the way blog/photo can have), so
   // noNewTextInstruction is always the right no-text variant here.
   let referenceImageUrl: string | undefined
-  parts.push(interiorRef ? interiorBlock(brand) : unitBrandingBlock(brand, unitPresence))
+  parts.push(interiorRef ? interiorBlock(brand) : unitBrandingBlock(brand, unitPresence, unitBlockOptions))
   if (showSubject) {
     // REFERENCE_IS_GUIDE_NOT_COPY explicitly tells the model to build a
     // genuinely new scene around the vehicle rather than copy the
     // character-ref photo — without it, a relevant scene risks coming out
     // looking like the character-ref's own plain reference shot instead of
     // that scene's actual visual_description.
-    parts.push(REFERENCE_IS_GUIDE_NOT_COPY)
+    parts.push(guideNotCopy)
     if (viewClause) parts.push(viewClause)
     parts.push(brand.noNewTextInstruction)
     referenceImageUrl = interiorRef ? interiorRef.url : (viewRef?.url ?? job.characterRefUrl)
@@ -1190,11 +1245,11 @@ interface SceneVideoJob {
    *  WORDMARK_LEGIBILITY_CLAUSE, since only those scenes have a real branded
    *  wordmark in the reference frame for the clip to keep legible. */
   unitPresence?: UnitPresence
-  /** How many people the reference frame shows (the scene's planned
-   *  visual_state.people). When a plain positive integer, the clip is told that
-   *  exactly that many people appear — real job a64ab879 scene 1 grew a second
-   *  mother mid-clip. Omitted/invalid keeps the generic "add nothing new" line. */
-  peopleCount?: number
+  /** A short, motion-only line (lint-checked, see lib/clipMotion.ts) written
+   *  from the approved still. When set it REPLACES visualDescription/shotNotes
+   *  and the long boilerplate: Seedance already sees the still, so the prompt
+   *  only says what moves plus a compact set of the clauses that matter. */
+  motion?: string
 }
 
 /** Prompt for Seedance 1.5 Pro image-to-video (adapters/kie.ts's
@@ -1290,11 +1345,11 @@ function lookHoldClause(look: VideoScriptLook | null | undefined): string {
 // ~4-5s: the video model repeats a scrolling background over a long take. The
 // backdrop must stay put; only the subject and gentle light/wind move.
 const NO_REPEATING_BACKGROUND_CLAUSE =
-  ' Fixed background: never pan or scroll past repeating poles, trees or buildings; no replayed motion.'
+  ' The background stays fixed; each motion plays out once.'
 
 const TEMPORAL_CONSISTENCY_CLAUSE =
-  ' Keep textures, packaging details, and lighting stable and flicker-free across every frame, with natural, ' +
-  'non-warped motion blur.'
+  ' Keep textures, packaging details, and lighting steady across every frame, with natural, ' +
+  'smooth motion blur.'
 
 // Added 2026-10-08 (Track C): one continuous shot and no readable
 // packaging text. Real renders produced a three-panel collage final scene
@@ -1320,14 +1375,14 @@ const UNIT_DESIGN_LOCK_CLAUSE =
 // clauses above inside the 2450-char cap.
 const VIDEO_VISUAL_QUALITY_STYLE =
   ' Rendered as premium, photorealistic cinematic smartphone footage: natural color, crisp realistic detail, ' +
-  'natural skin, lighting and motion blur — polished commercial quality, never oversaturated, over-sharpened, ' +
-  'or CGI-looking.'
+  'natural skin, lighting and motion blur — polished commercial quality with balanced color and ' +
+  'true-to-life sharpness.'
 
 // Added 2026-09-26 after a real Seedance render showed a background pedestrian
 // floating, detached from the ground, in an otherwise ordinary street shot.
 // Closed with a short, explicit textual rule the model checks itself against
 // (no new plan field, no new LLM call, no extra provider spend).
-const NO_PHANTOM_EFFECTS_CLAUSE = ' Everyone and everything rests on the ground.'
+const GROUNDED_CLAUSE = ' Everyone and everything stays on the ground.'
 
 // Short on purpose: sceneVideo's 2450-char cap truncates visualDescription first.
 const NO_ENTRY_EXIT_CLIP_CLAUSE =
@@ -1345,29 +1400,40 @@ const NO_ENTRY_EXIT_CLIP_CLAUSE =
 // with no branded unit in its reference frame has no wordmark for this
 // clause to protect, so it costs those scenes nothing.
 const WORDMARK_LEGIBILITY_CLAUSE =
-  ' Keep the brand wordmark identical, legible, and undistorted in every frame.'
+  ' Keep the brand wordmark identical and legible in every frame.'
 
 export function composeSceneVideoPrompt(job: SceneVideoJob): string {
   const appClause = (job.appUiVideoClause ?? '') + (job.sceneGuardVideoClause ?? '')
   const hasUnit = !!job.unitPresence && job.unitPresence !== 'none'
-  const n = job.peopleCount
-  const peopleClause =
-    typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 8
-      ? `preserve every limb and object exactly as shown and add nothing new. The frame shows exactly ${n} ` +
-        `${n === 1 ? 'person' : 'people'}: no one else ever appears, walks in, or is duplicated.`
-      : 'preserve every person, limb, and object exactly as shown and add nothing new.'
+  if (job.motion) {
+    return (
+      job.motion +
+      ' Locked-off, static camera. Only the movement above occurs; everything else holds perfectly still, with a ' +
+      'fixed background and steady lighting. The reference frame is the source of truth: every person, limb, and ' +
+      'object stays exactly as shown.' +
+      GROUNDED_CLAUSE +
+      NO_ENTRY_EXIT_CLIP_CLAUSE +
+      SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
+      ' Photorealistic footage with natural color and lighting.' +
+      lookHoldClause(job.look) +
+      (hasUnit ? UNIT_DESIGN_LOCK_CLAUSE + WORDMARK_LEGIBILITY_CLAUSE : '') +
+      appClause +
+      (job.isFinalScene ? FINAL_SCENE_SETTLE_CLAUSE : '')
+    )
+  }
+  const peopleClause = 'every person, limb, and object stays exactly as shown; the shot holds exactly what the frame holds.'
   const suffix =
     " Animate this as three distinct layers: the subject's own action described above; any natural ambient " +
     'motion already implied by the setting — wind moving hair, fabric, or leaves, water, ' +
-    'shifting light — but never motion with no real ' +
+    'shifting light — where every motion has a real ' +
     'cause: produce, goods and other solid objects at rest stay still unless a ' +
     'visible hand, wind, or other real force moves them; and camera motion as a separate layer ' +
     'on top of those two — follow whatever camera direction is given above (pans, tilts, tracking, slow ' +
-    'dolly, rack focus) with smooth, real-camera motion. Camera movement is never a substitute for actual ' +
-    'subject or environmental motion. Never a jump cut or a staged product-reveal move (slow ' +
-    'orbit, dramatic hero push-in). The reference frame is the source of truth — ' +
+    'dolly, rack focus) with smooth, real-camera motion. The subject and environment supply the actual ' +
+    'motion; the camera adds a layer on top. One smooth, continuous take with a grounded, documentary-style ' +
+    'camera. The reference frame is the source of truth — ' +
     peopleClause +
-    NO_PHANTOM_EFFECTS_CLAUSE +
+    GROUNDED_CLAUSE +
     NO_ENTRY_EXIT_CLIP_CLAUSE +
     SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
     TEMPORAL_CONSISTENCY_CLAUSE +

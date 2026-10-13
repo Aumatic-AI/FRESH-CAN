@@ -7,6 +7,8 @@ import {
   type ImageValidationInput,
   type ClipValidationInput,
   type ClipValidator,
+  type ClipMotionInput,
+  type ClipMotionWriter,
   type ImageValidationResult,
 } from './types'
 
@@ -50,7 +52,11 @@ export class OpenAIScriptGenerator implements ScriptGenerator {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: input.model ?? 'gpt-4o',
+        // Text generation (scripts, outlines, copy, localization, intent): moved
+        // from gpt-4o to gpt-6.1-sol on 2026-10-12 (verified live on chat
+        // completions with response_format json_object). The vision validators
+        // below stay on gpt-4o.
+        model: input.model ?? 'gpt-6.1-sol',
         messages: [
           { role: 'system', content: input.systemPrompt },
           { role: 'user', content: input.userPrompt },
@@ -137,18 +143,6 @@ export const THIRD_PARTY_BRAND_VALIDATION_CLAUSE =
   'vehicles or signs) other than Fresh-CAN; blurred, tiny or invented-looking text is not a defect. Use the ' +
   'text "legible third-party brand name or logo".'
 
-// Only when the plan gives a headcount. Real job e31d325e scene 2: a second girl
-// in the same yellow top and denim shorts stood behind the daughter and the
-// generic "extra person not implied by the scene" check let it through because
-// nothing told the validator how many people to expect.
-export const HEADCOUNT_VALIDATION_CLAUSE =
-  ' ALSO report as blocking when more distinct people are visible than the plan\'s stated headcount, or when ' +
-  'the same person appears twice (a duplicate in identical clothing). Screens and photos do not count as ' +
-  'people. A reflection in glass, a window or a mirror that matches the real subject\'s own pose and position ' +
-  'is fine, but a reflection showing an extra person, or a figure facing a different way than the real ' +
-  'subject, counts as an extra person (the video model animates it into a second man). Silhouettes and clearly ' +
-  'visible people in the background count too. Use the text "more people than planned or a duplicated person".'
-
 // Appended when the plan says the shot frames the unit's rear: the glass
 // double door (and the small white QR panel beside it) is then expected, so a
 // rear 3/4 view is never rejected as a "door on the side".
@@ -156,13 +150,8 @@ export const REAR_VIEW_VALIDATION_CLAUSE =
   ' This scene is planned as a view of the truck\'s REAR: the rear glass double door, and the small white QR panel ' +
   'beside it, are expected and must NOT be reported.'
 
-export function validExpectedPeople(n: unknown): n is number {
-  return typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= 8
-}
-
 export function buildImageValidationSystemPrompt(
   unitPresence?: 'none' | 'background' | 'featured',
-  expectedPeople?: number,
   unitView?: 'side' | 'rear34' | 'rear',
 ): string {
   let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE
@@ -170,7 +159,6 @@ export function buildImageValidationSystemPrompt(
     prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
     if (unitView === 'rear' || unitView === 'rear34') prompt += REAR_VIEW_VALIDATION_CLAUSE
   }
-  if (validExpectedPeople(expectedPeople)) prompt += HEADCOUNT_VALIDATION_CLAUSE
   return prompt
 }
 
@@ -218,10 +206,7 @@ export class OpenAIImageValidator implements ImageValidator {
   async validate(input: ImageValidationInput): Promise<ImageValidationResult> {
     const sceneText =
       'Scene description (the people, objects, and actions it names are expected, not defects): ' +
-      `${input.visualDescription}${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` +
-      (validExpectedPeople(input.expectedPeople)
-        ? ` The plan shows exactly ${input.expectedPeople} ${input.expectedPeople === 1 ? 'person' : 'people'}.`
-        : '')
+      `${input.visualDescription}${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` 
 
     const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -232,7 +217,7 @@ export class OpenAIImageValidator implements ImageValidator {
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence, input.expectedPeople, input.unitView) },
+          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence, input.unitView) },
           {
             role: 'user',
             content: [
@@ -304,9 +289,6 @@ export class OpenAIClipValidator implements ClipValidator {
     const sceneText =
       `Scene description (what the clip is meant to show): ${input.visualDescription}` +
       `${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` +
-      (validExpectedPeople(input.expectedPeople)
-        ? ` The plan shows exactly ${input.expectedPeople} ${input.expectedPeople === 1 ? 'person' : 'people'}.`
-        : '') +
       (input.unitPresence === 'background' || input.unitPresence === 'featured'
         ? ' The Fresh-CAN truck is part of this scene.'
         : ' No truck is expected in this scene.')
@@ -344,5 +326,59 @@ export class OpenAIClipValidator implements ClipValidator {
     // Fail OPEN on an unparseable reply — a quality gate on a clip that is already paid for.
     if (!Array.isArray(rawIssues)) return { pass: true, issues: [] }
     return parseValidationIssues(rawIssues)
+  }
+}
+
+// The image-to-video model already sees the still, so this prompt must describe
+// only what MOVES — never the image's contents (guides for Seedance 1.5 Pro and
+// the clip defects seen in jobs a64ab879/369ff9de agree on this). Reflections
+// are excluded because a reflected figure is animated into a second person.
+export const CLIP_MOTION_SYSTEM_PROMPT =
+  'You write the motion prompt for an image-to-video model. The model already sees the attached still frame, ' +
+  'so describe only what moves, never what the image looks like. Write ONE or TWO plain sentences (under 260 ' +
+  'characters): one or two small, concrete, natural actions of the people or things already visible in the frame ' +
+  '(a gesture, a head turn, a step, a breath, a smile), plus light ambient motion only if the frame already ' +
+  'implies it (a breeze in hair or leaves). Then say everything else holds still. Pace the actions to the clip ' +
+  'length. Mention only people and objects that are visible in the frame, and keep everyone on the same side of ' +
+  'any door or doorway they are on in the frame. Keep the camera out of it: it is locked off. Leave reflections ' +
+  'and anything not in the frame out. Reply with the sentences only: no quotes, no labels.'
+
+export class OpenAIClipMotionWriter implements ClipMotionWriter {
+  constructor(
+    private readonly apiKey: string,
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly model: string = 'gpt-6.1-sol',
+  ) {}
+
+  async write(input: ClipMotionInput): Promise<string> {
+    const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [
+          { role: 'system', content: CLIP_MOTION_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Scene intent: ${input.visualDescription}` +
+                  `${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''} ` +
+                  `Clip length: ${input.durationSeconds} seconds.`,
+              },
+              { type: 'image_url', image_url: { url: input.stillUrl } },
+            ],
+          },
+        ],
+      }),
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new ProviderCallError('openai', res.status, detail)
+    }
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
+    return data.choices?.[0]?.message?.content ?? ''
   }
 }

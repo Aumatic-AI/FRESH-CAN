@@ -4,8 +4,13 @@ import {
   findOffBandScenes,
   isBetterFit,
   narrationDescribesCrossing,
+  narrationUsesBrandPossessive,
+  findPossessiveBrandScenes,
   narrationWordRange,
+  writeNarration,
 } from './localizeScript'
+import type { ScriptGenerator } from '../../adapters/types'
+import type { VideoSceneRow } from '../../db'
 
 describe('narration length floor', () => {
   it('flags a 5s slot filled with 4 words but not a full one', () => {
@@ -80,5 +85,64 @@ describe('narration entry/exit lint', () => {
         { scene_number: 2, narration_text: 'She enters the unit and shops.' },
       ]),
     ).toEqual([2])
+  })
+})
+
+describe('brand possessive check', () => {
+  it('flags the possessive or plural brand but not the plain name', () => {
+    expect(narrationUsesBrandPossessive("thanks to Fresh-CAN's ease.", 'Fresh-CAN')).toBe(true)
+    expect(narrationUsesBrandPossessive('thanks to Fresh-CAN\u2019s ease.', 'Fresh-CAN')).toBe(true)
+    expect(narrationUsesBrandPossessive('thanks to FreshCans everywhere', 'Fresh-CAN')).toBe(true)
+    expect(narrationUsesBrandPossessive('thanks to Fresh-CAN, it is easy.', 'Fresh-CAN')).toBe(false)
+    expect(narrationUsesBrandPossessive('Fresh-CAN is here.', 'Fresh-CAN')).toBe(false)
+    expect(narrationUsesBrandPossessive('fresh fruit and a can of beans', 'Fresh-CAN')).toBe(false)
+  })
+  it('returns the scene numbers that need a rewrite', () => {
+    expect(
+      findPossessiveBrandScenes(
+        [
+          { scene_number: 1, narration_text: 'Fresh-CAN is here.' },
+          { scene_number: 2, narration_text: "Fresh-CAN's ease." },
+        ],
+        'Fresh-CAN',
+      ),
+    ).toEqual([2])
+  })
+})
+
+describe('writeNarration', () => {
+  const sceneRow = (narration?: string): VideoSceneRow =>
+    ({
+      id: 's1',
+      content_pipeline_id: 'p1',
+      generation: 1,
+      scene_number: 1,
+      visual_description: 'A woman scans a QR code.',
+      shot_notes: null,
+      narration_intent: { text: 'Explain the QR scan.', ...(narration ? { narration } : {}) },
+      target_duration_ms: 5000,
+      created_at: '',
+    }) as VideoSceneRow
+
+  const recordingGenerator = (calls: string[]): ScriptGenerator => ({
+    async generate(input) {
+      calls.push(input.userPrompt)
+      const text = Array(narrationWordRange(5000).min).fill('word').join(' ')
+      return { parsed: { scenes: [{ scene_number: 1, narration_text: text }] }, raw: '' } as never
+    },
+  })
+
+  it('hands the approved English narration to a French rewrite as the text to translate', async () => {
+    const calls: string[] = []
+    await writeNarration(recordingGenerator(calls), [sceneRow('She scans her code.')], { language: 'French', wordsPerSecond: 2.65 })
+    expect(JSON.parse(calls[0])[0].approved_english_narration).toBe('She scans her code.')
+  })
+
+  it('does not add approved_english_narration for English, or when no narration was written', async () => {
+    const calls: string[] = []
+    await writeNarration(recordingGenerator(calls), [sceneRow('She scans her code.')], { language: 'English', wordsPerSecond: 2.65 })
+    await writeNarration(recordingGenerator(calls), [sceneRow()], { language: 'French', wordsPerSecond: 2.65 })
+    expect(JSON.parse(calls[0])[0]).not.toHaveProperty('approved_english_narration')
+    expect(JSON.parse(calls[1])[0]).not.toHaveProperty('approved_english_narration')
   })
 })

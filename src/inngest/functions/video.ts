@@ -53,11 +53,12 @@ import { interpretIntent } from '../../server/pipeline/steps/shared/interpretInt
 import { runGenerateScript, type VideoScriptJobInput } from '../../server/pipeline/steps/video/generateScript'
 import { runGenerateCharacterRef } from '../../server/pipeline/steps/video/generateCharacterRef'
 import { runGenerateSceneVisual } from '../../server/pipeline/steps/video/generateSceneVisual'
+import { runDraftNarration } from '../../server/pipeline/steps/video/draftNarration'
 import { runLocalizeScript } from '../../server/pipeline/steps/video/localizeScript'
 import { runSynthesizeVoice } from '../../server/pipeline/steps/video/synthesizeVoice'
 import { runTranscribeAudio } from '../../server/pipeline/steps/video/transcribeAudio'
 import { runRenderLanguageTrack } from '../../server/pipeline/steps/video/renderLanguageTrack'
-import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator } from '../../server/pipeline/adapters/openai'
+import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, OpenAIClipMotionWriter } from '../../server/pipeline/adapters/openai'
 import { KieVideoGenerator } from '../../server/pipeline/adapters/kie'
 import { NanoBananaImageGenerator } from '../../server/pipeline/adapters/nanoBanana'
 import { FakeKieImageGenerator, FakeKieVideoGenerator } from '../../server/pipeline/adapters/kieFake'
@@ -128,6 +129,10 @@ async function sceneImageValidator(jobId: string) {
 
 async function sceneClipValidator(jobId: string) {
   return new OpenAIClipValidator(await getApiKey('openai', { jobId }))
+}
+
+async function sceneClipMotionWriter(jobId: string) {
+  return new OpenAIClipMotionWriter(await getApiKey('openai', { jobId }))
 }
 
 async function fetchPipeline(pipelineId: string): Promise<PipelineRow> {
@@ -232,6 +237,18 @@ export const videoGenerate = inngest.createFunction(
       await step.sleep(`generate-script-backoff-${attempt}`, RETRY_POLL_INTERVAL)
     }
 
+    // The user approves a script, so write the real spoken narration now (see
+    // draftNarration.ts). Fail-open: a failure here just leaves the narration
+    // boxes empty and localize_script writes narration at approval as before.
+    if (pipeline.status === 'draft_ready') {
+      await step.run('draft-narration', () =>
+        runDraftNarration(client, pipelineId, scriptGenerator, {
+          voiceId: job.voice_id_en,
+          sceneNotes: job.scene_notes,
+        }),
+      )
+    }
+
     return { status: pipeline.status }
   },
 )
@@ -292,6 +309,7 @@ async function runSceneVisualsUntilSettled(
   const scaler = new UploadPostAVMerger(await getApiKey('upload_post', { jobId }))
   const imageValidator = await sceneImageValidator(jobId)
   const clipValidator = await sceneClipValidator(jobId)
+  const motionWriter = await sceneClipMotionWriter(jobId)
 
   let pipeline = await fetchPipeline(pipelineId)
   for (let attempt = 0; attempt < MAX_RETRY_LOOP_ITERATIONS; attempt++) {
@@ -309,6 +327,7 @@ async function runSceneVisualsUntilSettled(
         aspectRatio,
         imageValidator,
         clipValidator,
+        motionWriter,
       )
       return fetchPipeline(pipelineId)
     })

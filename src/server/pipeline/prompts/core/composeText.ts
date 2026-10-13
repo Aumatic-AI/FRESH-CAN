@@ -892,6 +892,9 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'makes the whole video longer than the length that was requested, and narration that runs short makes it ' +
     'shorter — both are real problems, not cosmetic ones. ' +
     `${NO_ENTRY_EXIT_NARRATION_RULE} ` +
+    `When a scene carries "approved_english_narration", the creator already approved that English wording: translate ` +
+    `it faithfully into ${opts.language} (same meaning, facts and tone), changing it only as much as needed to fit ` +
+    'the scene\'s min_words-max_words band, and treat narration_intent as background context only. ' +
     'Each scene also carries "on_screen" (what the viewer sees); narration must agree with it, describing only ' +
     'what that scene shows or the idea it carries. ' +
     (opts.sceneNotes
@@ -903,7 +906,9 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     `a narration_intent explicitly calls for naming ${brand.name} (or otherwise references the brand by name), the ` +
     `localized ${opts.language} wording MUST include that name literally, spoken naturally — never paraphrase, ` +
     'translate, soften, or drop it for sounding too promotional; that specific mention is a deliberate, ' +
-    'required part of the story, not the generic ad-copy pattern this rule exists to avoid elsewhere. Respond ' +
+    'required part of the story, not the generic ad-copy pattern this rule exists to avoid elsewhere. Write the ' +
+    `name exactly as "${brand.name}", as a plain standalone name: never possessive ("${brand.name}'s"), never plural, ` +
+    'never run into the next word. Speech-to-text hears a possessive plus the next word as a different word. Respond ' +
     'with strictly valid JSON: ' +
     '{ "scenes": [ { "scene_number": number, "narration_text": string } ] }, exactly one entry per scene given, ' +
     'in the same order, using the given scene_number values unchanged.'

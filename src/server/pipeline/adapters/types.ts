@@ -115,10 +115,6 @@ export interface ImageValidationInput {
    *  (no door/hatch/opening on the front or side). Omitted or 'none' = the
    *  original checks only. */
   unitPresence?: 'none' | 'background' | 'featured'
-  /** How many people the plan says this scene shows (visual_state.people). When
-   *  a positive integer, the validator also rejects more distinct people than
-   *  that, or the same person twice. Omitted/0 = no headcount check. */
-  expectedPeople?: number
   /** The scene's planned unit_view. 'rear'/'rear34' tell the validator the rear
    *  door is expected in frame. */
   unitView?: 'side' | 'rear34' | 'rear'
@@ -169,14 +165,28 @@ export interface ClipValidationInput {
   frames: Buffer[]
   visualDescription: string
   shotNotes?: string | null
-  /** The plan's headcount for the scene (positive integer), when known. */
-  expectedPeople?: number
   /** Whether the Fresh-CAN unit is part of the scene ('none' = no unit checks). */
   unitPresence?: 'none' | 'background' | 'featured'
 }
 
 export interface ClipValidator {
   validate(input: ClipValidationInput): Promise<ImageValidationResult>
+}
+
+export interface ClipMotionInput {
+  /** The approved scene still the clip animates from — the writer looks at it. */
+  stillUrl: string
+  visualDescription: string
+  shotNotes?: string | null
+  /** The clip length being requested, so the actions are paced to it. */
+  durationSeconds: number
+}
+
+/** Writes the short, motion-only prompt for the image-to-video model from the
+ *  approved still + the scene's script fields. Returns the raw text (the caller
+ *  lints it with lib/clipMotion.ts and falls back to the scene-text prompt). */
+export interface ClipMotionWriter {
+  write(input: ClipMotionInput): Promise<string>
 }
 
 // ─── Video-only adapters (M0 of the video migration) ───────────────────────
