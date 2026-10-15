@@ -2210,3 +2210,5 @@ Audited the 3 real video jobs from 2026-10-08 (790b8771 44.2s, e4a83ec0 39.1s, 5
 - ✅ Job page: draft-time narration now fills the "Narration (spoken)" boxes via the status poll (no reload); untouched scenes adopt new narration, in-progress edits are never overwritten.
 - ⚠️ Known: `videoPipeline.e2e.test.ts` "re-running generate_script…" fails (provider called twice) — pre-existing, unrelated. That e2e file writes to the real DB ("E2E VIDEO TEST - DELETE ME" rows).
 - ⭐ Next: re-run `draft-narration` on a real job to judge the new wording; investigate the generate_script double call.
+
+- ✅ Video storage: `SupabaseVideoStorageUploader.uploadBuffer` retries a failed upload up to 3 times (2s/6s pauses) in-process, so a flaky connection no longer re-runs the paid upload-post.com render (job 957acf56 hit this: 14 MB upload, `fetch failed`). Tests in `storage.test.ts`.

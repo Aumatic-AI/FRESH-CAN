@@ -87,14 +87,34 @@ export class SupabaseVideoStorageUploader implements VideoStorageUploader {
   constructor(
     private readonly client: SupabaseClient,
     private readonly fetchImpl: typeof fetch = fetch,
+    // Pauses before the 2nd and 3rd upload try (so 3 tries in total).
+    private readonly uploadRetryDelaysMs: readonly number[] = [2_000, 6_000],
   ) {}
 
+  /**
+   * The bytes are already in memory, so a flaky connection (`fetch failed`)
+   * retries just the upload — never the paid upload-post.com render that
+   * produced them, which a thrown error here would otherwise re-run in full.
+   */
   async uploadBuffer(path: string, buffer: Buffer, contentType: string): Promise<string> {
-    const { error } = await this.client.storage
-      .from(VIDEO_STORAGE_BUCKET)
-      .upload(path, buffer, { contentType, upsert: true })
-    if (error) {
-      throw new Error(`failed to upload to ${VIDEO_STORAGE_BUCKET}/${path}: ${error.message}`)
+    let lastMessage = ''
+    for (let attempt = 0; attempt <= this.uploadRetryDelaysMs.length; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, this.uploadRetryDelaysMs[attempt - 1]))
+      try {
+        const { error } = await this.client.storage
+          .from(VIDEO_STORAGE_BUCKET)
+          .upload(path, buffer, { contentType, upsert: true })
+        if (!error) {
+          lastMessage = ''
+          break
+        }
+        lastMessage = error.message
+      } catch (err) {
+        lastMessage = err instanceof Error ? err.message : String(err)
+      }
+    }
+    if (lastMessage) {
+      throw new Error(`failed to upload to ${VIDEO_STORAGE_BUCKET}/${path}: ${lastMessage}`)
     }
 
     const { data } = this.client.storage.from(VIDEO_STORAGE_BUCKET).getPublicUrl(path)
