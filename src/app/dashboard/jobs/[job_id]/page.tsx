@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -741,11 +741,32 @@ function VideoTabContent({
   // bumps current_generation) — not on every 6s status poll (page.tsx's own
   // poll effect refetches videoStatus, and therefore `scenes`, continuously
   // while draft_ready), which would otherwise stomp in-progress edits.
+  const seededNarration = useRef<Record<string, string>>({})
   useEffect(() => {
-    setEditedNarration(Object.fromEntries(scenes.map((s) => [s.id, sceneNarrationText(s.narration_intent)])))
+    const seeded = Object.fromEntries(scenes.map((s) => [s.id, sceneNarrationText(s.narration_intent)]))
+    seededNarration.current = seeded
+    setEditedNarration(seeded)
     setScriptSaveError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pipeline.current_generation])
+
+  // The draft-time narration is written a few seconds AFTER the scene plan is
+  // first shown, so the status poll later delivers narration for scenes seeded
+  // as ''. Adopt it for any scene the user hasn't touched (edit still equals
+  // what we last seeded); never overwrite an in-progress edit.
+  useEffect(() => {
+    const fresh = Object.fromEntries(scenes.map((s) => [s.id, sceneNarrationText(s.narration_intent)]))
+    const changed = scenes.filter((s) => fresh[s.id] !== seededNarration.current[s.id])
+    if (changed.length === 0) return
+    setEditedNarration((prev) => {
+      const next = { ...prev }
+      for (const s of changed) {
+        if (prev[s.id] === undefined || prev[s.id] === (seededNarration.current[s.id] ?? '')) next[s.id] = fresh[s.id]
+      }
+      return next
+    })
+    seededNarration.current = { ...seededNarration.current, ...fresh }
+  }, [scenes])
 
   const dirtySceneIds = scenes
     .filter((s) => editedNarration[s.id] !== undefined && editedNarration[s.id] !== sceneNarrationText(s.narration_intent))

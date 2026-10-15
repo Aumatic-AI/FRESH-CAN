@@ -895,8 +895,15 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     `When a scene carries "approved_english_narration", the creator already approved that English wording: translate ` +
     `it faithfully into ${opts.language} (same meaning, facts and tone), changing it only as much as needed to fit ` +
     'the scene\'s min_words-max_words band, and treat narration_intent as background context only. ' +
-    'Each scene also carries "on_screen" (what the viewer sees); narration must agree with it, describing only ' +
-    'what that scene shows or the idea it carries. ' +
+    'Each scene also carries "on_screen" (what the viewer sees); narration must never contradict it or mention ' +
+    'anything it does not support, but do not just describe the picture: write the whole video as one short ' +
+    'spoken story with a small arc (a gentle hook, a turn, a warm landing in the last scene), adding feeling, ' +
+    'the character\'s inner moment or a touch of human warmth the viewer cannot see, with varied sentence ' +
+    'rhythm and at most one light image or turn of phrase per scene. Never reuse the same descriptive word or ' +
+    'phrase (for example an adjective like "juicy", or "the weekend") in two scenes, and let the last line end on a ' +
+    'concrete, feeling-led image rather than a summary. State each hard fact (for example that the ' +
+    'QR code identifies rather than pays, or that nothing is scanned) once across the whole video, in the scene ' +
+    'it fits best, and keep the other scenes free of repeated disclaimers. ' +
     (opts.sceneNotes
       ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it, and any ` +
         'action it rules out (for example "no scanning") never appears in the wording. '

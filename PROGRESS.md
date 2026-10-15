@@ -2201,3 +2201,12 @@ Audited the 3 real video jobs from 2026-10-08 (790b8771 44.2s, e4a83ec0 39.1s, 5
 - Still validator: also rejects a person missing a limb / body part vanishing mid-frame, a face cut off when the scene calls for it, and a clearly wrong truck shape (cube, no cab). Same blocking + high-confidence bar.
 - Not changed: finished-clip check stays report-only (2026-10-12 decision).
 - Verified: `tsc` clean; 768 tests pass (new: `generateCastRefs.test.ts`, cast-reference + door tests in `compose.test.ts`, multi-reference in `nanoBanana.test.ts`, door note in `openai.test.ts`; 6 old tests updated for the camera/door wording). NOT verified on a real render; costs one extra nano-banana image per recurring person per generation.
+
+---
+
+## Session — 2026-10-15 (narration voice + draft UI)
+
+- ✅ Narration prompt (`composeLocalizeScriptSystemPrompt`): story-style voice (hook/turn/warm landing), facts stated once, no repeated descriptors across scenes, last line ends on a concrete image; still must not contradict `on_screen`.
+- ✅ Job page: draft-time narration now fills the "Narration (spoken)" boxes via the status poll (no reload); untouched scenes adopt new narration, in-progress edits are never overwritten.
+- ⚠️ Known: `videoPipeline.e2e.test.ts` "re-running generate_script…" fails (provider called twice) — pre-existing, unrelated. That e2e file writes to the real DB ("E2E VIDEO TEST - DELETE ME" rows).
+- ⭐ Next: re-run `draft-narration` on a real job to judge the new wording; investigate the generate_script double call.
