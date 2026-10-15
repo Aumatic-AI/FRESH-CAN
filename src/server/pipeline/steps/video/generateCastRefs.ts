@@ -7,7 +7,7 @@ import type { CastBibleEntry } from '../../prompts/types'
 import { BRAND_PROFILE, composeCastRefPrompt } from '../../prompts/index'
 
 const POLL_INTERVAL_MS = 2000
-const POLL_TIMEOUT_MS = 90_000
+const POLL_TIMEOUT_MS = 300_000
 
 /**
  * One reference portrait per recurring person (cast_bible entry), generated

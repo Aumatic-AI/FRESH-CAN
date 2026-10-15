@@ -15,7 +15,7 @@ import {
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 
 const POLL_INTERVAL_MS = 2000
-const POLL_TIMEOUT_MS = 60_000
+const POLL_TIMEOUT_MS = 300_000
 
 /** Same transient-vs-genuine distinction as generateSceneVisual.ts's shared
  *  pollUntilDone (this step predates that file's version and has never been

@@ -54,7 +54,7 @@ const IMAGE_POLL_INTERVAL_MS = 2000
 // to the image side. Doubled, matching that fix's own ratio, pending real
 // timing data on how long KIE.ai's Flux Kontext endpoint actually takes
 // under concurrent submission load.
-const IMAGE_POLL_TIMEOUT_MS = 120_000
+const IMAGE_POLL_TIMEOUT_MS = 300_000
 // Kling clips take meaningfully longer than a still image to generate.
 // Raised from 180_000 (2026-09-14): a real 9-scene run had 3 of 9 scenes
 // (1, 4, 7) time out on their first poll window at 180s, and scene 7 timed

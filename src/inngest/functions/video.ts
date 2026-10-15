@@ -63,7 +63,7 @@ import { runTranscribeAudio } from '../../server/pipeline/steps/video/transcribe
 import { runRenderLanguageTrack } from '../../server/pipeline/steps/video/renderLanguageTrack'
 import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, OpenAIClipMotionWriter } from '../../server/pipeline/adapters/openai'
 import { KieVideoGenerator } from '../../server/pipeline/adapters/kie'
-import { NanoBananaImageGenerator } from '../../server/pipeline/adapters/nanoBanana'
+import { GptImageGenerator } from '../../server/pipeline/adapters/gptImage'
 import { FakeKieImageGenerator, FakeKieVideoGenerator } from '../../server/pipeline/adapters/kieFake'
 import type { ImageGenerator, VideoGenerator } from '../../server/pipeline/adapters/types'
 import { SupabaseVideoStorageUploader } from '../../server/pipeline/adapters/storage'
@@ -100,7 +100,8 @@ const MAX_VISUALS_WAIT_ITERATIONS = 120
 
 const client = createServiceClient()
 
-// PERMANENT as of 2026-09-23: character-ref and scene-image generation
+// Video character-ref/scene images now use GPT Image 2.5 (Sunburst, 1K) via
+// GptImageGenerator, as do blog and image_post. Earlier history: character-ref and scene-image generation
 // both moved from KieImageGenerator (Flux Kontext) to NanoBananaImageGenerator
 // (nano-banana-2), unifying video onto the same image model blog/image_post
 // already use permanently — see nanoBanana.ts's own header for the full
@@ -115,10 +116,10 @@ const client = createServiceClient()
 // API keys are resolved per job (getApiKey's `jobId`) so the account a job
 // started on never changes mid-job — see credentials.ts.
 async function characterRefGenerator(jobId: string): Promise<ImageGenerator> {
-  return env.KIE_FAKE_MODE ? new FakeKieImageGenerator() : new NanoBananaImageGenerator(await getApiKey('kie', { jobId }))
+  return env.KIE_FAKE_MODE ? new FakeKieImageGenerator() : new GptImageGenerator(await getApiKey('kie', { jobId }))
 }
 async function sceneImageGenerator(jobId: string): Promise<ImageGenerator> {
-  return env.KIE_FAKE_MODE ? new FakeKieImageGenerator() : new NanoBananaImageGenerator(await getApiKey('kie', { jobId }))
+  return env.KIE_FAKE_MODE ? new FakeKieImageGenerator() : new GptImageGenerator(await getApiKey('kie', { jobId }))
 }
 async function sceneVideoGenerator(jobId: string): Promise<VideoGenerator> {
   return env.KIE_FAKE_MODE ? new FakeKieVideoGenerator() : new KieVideoGenerator(await getApiKey('kie', { jobId }))

@@ -25,7 +25,7 @@ import { runGeneratePhoto } from '../../server/pipeline/steps/image/generatePhot
 import { runGenerateCaption, type CaptionJobInput } from '../../server/pipeline/steps/image/generateCaption'
 import { runFinalizeImageContent } from '../../server/pipeline/steps/image/finalizeImageContent'
 import { OpenAIScriptGenerator } from '../../server/pipeline/adapters/openai'
-import { NanoBananaImageGenerator } from '../../server/pipeline/adapters/nanoBanana'
+import { GptImageGenerator } from '../../server/pipeline/adapters/gptImage'
 import { FakeKieImageGenerator } from '../../server/pipeline/adapters/kieFake'
 import type { ImageGenerator } from '../../server/pipeline/adapters/types'
 import { SupabasePhotoStorageUploader } from '../../server/pipeline/adapters/storage'
@@ -183,19 +183,17 @@ export const imageGenerate = inngest.createFunction(
   async ({ event, step }) => {
     const { pipelineId, jobId } = event.data as { pipelineId: string; jobId: string }
     const scriptGenerator = new OpenAIScriptGenerator(await getApiKey('openai', { jobId }))
-    // PERMANENT as of 2026-09-23: nano-banana-2 (NanoBananaImageGenerator)
-    // is the permanent image model regardless of imageStyle, not a
-    // temporary test-cost measure — matches blog and video, which made
-    // the same call the same day (see nanoBanana.ts's own header for the
-    // full history and the aspectRatio bug fixed alongside this).
+    // GPT Image 2.5 (GptImageGenerator, Sunburst, 1K) is the image model for
+    // hero/inline, image_post and video; it replaced nano-banana-2. Its
+    // documented aspect-ratio list has no 4:5, so the unset default here is 3:4.
     //
     // KIE_FAKE_MODE (test-only, default off — see env.ts/adapters/kieFake.ts):
     // previously video-only; extended here (2026-09-18) so a local smoke
     // test can exercise the full blog/image event chain without spending
     // real KIE credits. Never set in production.
-    const nanoBananaGenerator: ImageGenerator = env.KIE_FAKE_MODE
+    const imageGenerator: ImageGenerator = env.KIE_FAKE_MODE
       ? new FakeKieImageGenerator()
-      : new NanoBananaImageGenerator(await getApiKey('kie', { jobId }))
+      : new GptImageGenerator(await getApiKey('kie', { jobId }))
     const uploader = new SupabasePhotoStorageUploader(client)
 
     let pipeline = await step.run('fetch-pipeline', () => fetchPipeline(pipelineId))
@@ -280,7 +278,7 @@ export const imageGenerate = inngest.createFunction(
         pipelineId,
         photo.prompt,
         photo.referenceImageUrl,
-        nanoBananaGenerator,
+        imageGenerator,
         uploader,
       )
     }
