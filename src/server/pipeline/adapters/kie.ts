@@ -234,8 +234,10 @@ export class KieSceneImageGenerator implements ImageGenerator {
 }
 
 /**
- * KIE.ai scene video-clip generation — Bytedance Seedance 1.5 Pro
- * image-to-video, the production model, via the unified Market job
+ * KIE.ai scene video-clip generation — Bytedance Seedance 2.0 mini
+ * (`bytedance/seedance-2-mini`, upgraded from 1.5 Pro; docs.kie.ai/market/
+ * bytedance/seedance-2-mini: frame is `first_frame_url` not `input_urls`, no
+ * `fixed_lens`, 480p/720p, duration 4-15) image-to-video, the production model, via the unified Market job
  * endpoints (POST /api/v1/jobs/createTask, GET /api/v1/jobs/recordInfo),
  * verified against docs.kie.ai/market/bytedance/seedance-1-5-pro on
  * 2026-09-21. `referenceImageUrl` is always the scene's already-generated
@@ -317,10 +319,10 @@ export class KieVideoGenerator implements VideoGenerator {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'bytedance/seedance-1.5-pro',
+        model: 'bytedance/seedance-2-mini',
         input: {
           prompt: input.prompt,
-          input_urls: [input.referenceImageUrl],
+          first_frame_url: input.referenceImageUrl,
           aspect_ratio: input.aspectRatio,
           // Matches delivery resolution so no upscale is needed downstream —
           // see this class's header for the per-resolution cost math.
@@ -329,11 +331,8 @@ export class KieVideoGenerator implements VideoGenerator {
           // (avMerger.ts) — this call never carries the language-specific
           // narration, so no ambient/audio track is requested here either.
           generate_audio: false,
-          // Locks the camera (KIE docs: "fixed_lens ... Locks the camera when
-          // true"). The planner now writes only static shots, and a moving
-          // virtual camera is what made the video model scroll, repeat and
-          // morph backgrounds (jobs a64ab879, 369ff9de).
-          fixed_lens: true,
+          // Seedance 2.0 mini has no `fixed_lens` input (1.5 Pro did); camera
+          // stillness now relies on the planner's static-shot prompts alone.
           duration: input.durationSeconds,
         },
       }),
