@@ -2212,3 +2212,8 @@ Audited the 3 real video jobs from 2026-10-08 (790b8771 44.2s, e4a83ec0 39.1s, 5
 - ⭐ Next: re-run `draft-narration` on a real job to judge the new wording; investigate the generate_script double call.
 
 - ✅ Video storage: `SupabaseVideoStorageUploader.uploadBuffer` retries a failed upload up to 3 times (2s/6s pauses) in-process, so a flaky connection no longer re-runs the paid upload-post.com render (job 957acf56 hit this: 14 MB upload, `fetch failed`). Tests in `storage.test.ts`.
+
+## 2026-10-31 — Default cast: white Canadians unless the idea says otherwise
+- `prompts/core/composeText.ts` `creativeBriefContext()` now appends a default-people clause: unless the admin's idea explicitly specifies who appears, any people shown are white Canadians (apparent European heritage); an explicit specification overrides it.
+- One shared spot feeds the blog outline, image plan and video script prompts. No types, schema or DB change; existing drafts untouched.
+- Verified: `tsc --noEmit` clean, prompt tests pass (251). Blog image path not traced end-to-end.

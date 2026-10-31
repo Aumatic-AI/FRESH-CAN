@@ -25,7 +25,10 @@ function creativeBriefContext(brief: CreativeBrief): string {
     `"${brief.desiredResponse}".${improvements}${constraints} That same pass also estimated the brand's ` +
     `physical unit is "${brief.unitRelevance.value}" to this idea (${brief.unitRelevance.rationale}) — treat ` +
     'this as a starting point to confirm or refine with the full context below, never as a directive that ' +
-    'overrides your own judgment once you have it.'
+    'overrides your own judgment once you have it. ' +
+    "Unless the admin's idea explicitly specifies who appears (ethnicity, community or a named group), " +
+    'any people shown — recurring cast, featured subjects or incidental figures — are white Canadians ' +
+    '(apparent European heritage). If the idea does specify, follow it exactly and ignore this default.'
   )
 }
 
