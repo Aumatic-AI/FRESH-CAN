@@ -66,6 +66,12 @@ export interface VideoScriptStory {
    *  field is optional, and a job created before the spine existed simply
    *  has none of them. */
   /** The one-line human truth the video is built on. */
+  /** The tweaked, catchier story the whole video is built on (2 plain sentences). */
+  concept?: string
+  /** 'promo': an ad voiceover that speaks to the viewer as "you" (product-led ideas). 'story': a third-person story. */
+  voice?: 'promo' | 'story'
+  /** One small running idea that returns two or three times (never every scene). */
+  thread?: string
   insight?: string
   /** One of STORY_FRAMEWORKS (generateScript.ts). */
   framework?: string
@@ -93,6 +99,12 @@ export interface VideoScriptStory {
 /** What the narration is written from. Built from the plan's `story` by
  *  narrationSpineFromStory; undefined for a plan without a spine. */
 export interface NarrationSpine {
+  /** The tweaked, catchier story the whole video is built on (2 plain sentences). */
+  concept?: string
+  /** 'promo': an ad voiceover that speaks to the viewer as "you" (product-led ideas). 'story': a third-person story. */
+  voice?: 'promo' | 'story'
+  /** One small running idea that returns two or three times (never every scene). */
+  thread?: string
   insight?: string
   hook?: string
   hook_type?: string
@@ -210,6 +222,11 @@ export interface BrandReferenceImage {
    *  what's in view) — factual only, never a directive about the NEW
    *  image's own composition. */
   whatItShows: string
+  /** The camera face (core/containerCamera.ts) this photo already shows. When it
+   *  is the source of a scene, that face is never picked for the scene's camera,
+   *  so the scene cannot reproduce the photo's composition. Omit when the photo's
+   *  view is not one of the camera faces. */
+  cameraFace?: string
   /** Real elements visible in this specific photo that are NOT part of the
    *  brand's canonical design (e.g. an extra decal, URL text, a second
    *  wordmark) — named explicitly so nothing is left for the model to
@@ -281,6 +298,11 @@ export interface BrandProfile {
    *  slogan-like closers). Plain lowercase phrases; sent to the narration
    *  prompt and enforced by lib/narrationStyle.ts. */
   narrationTells?: readonly string[]
+  /** Abstract nouns a closing line should not lean on; the last line lands on a
+   *  concrete image instead (knowledge base §6.3). Lowercase; EN and FR. */
+  narrationAbstractNouns?: readonly string[]
+  /** Vague mood-filler phrases that say nothing specific (lowercase; EN and FR). */
+  narrationVaguePhrases?: readonly string[]
   /** Ways a video's narration must never OPEN (knowledge base §6A.4), and
    *  ways its last scene must never CLOSE. Lowercase phrases. */
   narrationBannedOpeners?: readonly string[]

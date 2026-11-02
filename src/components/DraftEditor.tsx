@@ -188,6 +188,19 @@ export default function DraftEditor({
 
         {contentType === 'video' && (
           <>
+            {(() => {
+              const story = (localData.story ?? null) as { concept?: unknown; hook?: unknown } | null
+              const concept = typeof story?.concept === 'string' ? story.concept.trim() : ''
+              const hook = typeof story?.hook === 'string' ? story.hook.trim() : ''
+              if (!concept && !hook) return null
+              return (
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                  <p className="mb-1 text-xs font-medium text-gray-700">Story concept</p>
+                  {concept && <p>{concept}</p>}
+                  {hook && <p className="mt-1 text-xs text-gray-500">Hook idea: {hook}</p>}
+                </div>
+              )
+            })()}
             <div>
               <label className="mb-1.5 block text-xs font-medium text-gray-700">
                 Script / Voiceover

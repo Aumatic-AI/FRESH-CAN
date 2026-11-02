@@ -118,8 +118,9 @@ describe('narration prompt', () => {
     expect(p).toContain('at most one scene of the whole video')
     expect(p).toContain('hearts sink')
     expect(p).toContain('NOTES on what to convey')
-    expect(p).toContain('REGISTER: warm and clear')
-    expect(p).toContain('at most ONE gentle figurative touch')
+    // Register changed deliberately (witty and conversational; see narrationStyle.craft.test.ts).
+    expect(p).toContain('PERSONALITY. Where the story invites it, be witty')
+    expect(p).not.toContain('never slang, banter, jokes')
     expect(p).not.toContain('funny beat')
   })
 })

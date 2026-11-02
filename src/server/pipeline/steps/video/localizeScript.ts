@@ -193,6 +193,8 @@ export async function writeNarration(
     spine?: NarrationSpine
     /** Run the one-call review and at most one rewrite (English drafts with a spine). */
     review?: boolean
+    /** First lines of recent English videos (English tracks only). */
+    recentOpeners?: readonly string[]
     onReview?: (record: NarrationReviewRecord) => void
   },
 ): Promise<LocalizedScene[]> {
@@ -202,6 +204,7 @@ export async function writeNarration(
     wordsPerSecond,
     sceneNotes: opts.sceneNotes,
     spine: opts.spine,
+    recentOpeners: opts.language === 'English' ? opts.recentOpeners : undefined,
   })
   const sceneRequest = (s: (typeof scenes)[number], extra: Record<string, unknown> = {}) => {
     const range = narrationWordRange(s.target_duration_ms, wordsPerSecond)
@@ -324,6 +327,11 @@ export async function writeNarration(
     hardFacts: BRAND_PROFILE.narrationHardFacts,
     openers: BRAND_PROFILE.narrationBannedOpeners,
     closers: BRAND_PROFILE.narrationBannedClosers,
+    abstractNouns: BRAND_PROFILE.narrationAbstractNouns,
+    ...(opts.spine?.voice === 'promo' ? { promo: true } : {}),
+    vaguePhrases: BRAND_PROFILE.narrationVaguePhrases,
+    ...(opts.language === 'English' && opts.recentOpeners ? { recentOpeners: opts.recentOpeners } : {}),
+    brandName: BRAND_PROFILE.name,
     // The hook cap and the picture-echo check only apply to a plan with a
     // spine (older jobs narrate as before), and the echo check is English-only
     // because on_screen is English.
@@ -332,10 +340,9 @@ export async function writeNarration(
       ? { onScreen: new Map(scenes.map((s) => [s.scene_number, s.visual_description] as const)) }
       : {}),
   }
-  // Skipped when a non-English track is translating wording the creator already
-  // approved: that text is theirs, and restyling it would drift from what they signed off.
-  const translatingApproved = opts.language !== 'English' && scenes.some((s) => readSceneNarration(s.narration_intent).trim() !== '')
-  const styleIssues = translatingApproved ? new Map<number, string[]>() : findNarrationStyleIssues(localized, styleOpts)
+  // The French track is restyled too: its text is a fresh translation, not wording the creator
+  // signed off, and every rewrite request carries the approved English so the meaning is kept.
+  const styleIssues = findNarrationStyleIssues(localized, styleOpts)
   const issueCount = (n: number, text: string) =>
     findNarrationStyleIssues(
       localized.map((l) => (l.scene_number === n ? { scene_number: n, narration_text: text } : l)),
@@ -376,7 +383,7 @@ export async function writeNarration(
       const ordered = [...scenes].sort((a, b) => a.scene_number - b.scene_number)
       const lastScene = ordered[ordered.length - 1].scene_number
       const reviewResult = await scriptGenerator.generate({
-        systemPrompt: composeNarrationReviewSystemPrompt(BRAND_PROFILE, { language: opts.language }),
+        systemPrompt: composeNarrationReviewSystemPrompt(BRAND_PROFILE, { language: opts.language, voice: opts.spine?.voice }),
         userPrompt: JSON.stringify({
           language: opts.language,
           brand_name: BRAND_PROFILE.name,
@@ -407,7 +414,7 @@ export async function writeNarration(
         new Map(localized.map((l) => [l.scene_number, l.narration_text] as const)),
       )
       if (review) {
-        const { notes, endingVisualMismatch } = planReviewRewrites(review, lastScene, opts.spine.quotable_scene)
+        const { notes, endingVisualMismatch } = planReviewRewrites(review, lastScene, opts.spine.quotable_scene, firstScene?.scene_number)
         const before = new Map(localized.map((l) => [l.scene_number, l.narration_text]))
         if (notes.size > 0) {
           const names = (swap: { scene_number: number; text: string }) =>

@@ -201,6 +201,12 @@ export function normalizeStory(value: unknown): VideoScriptStory | undefined {
   const text = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : undefined)
   const insight = text(v.insight)
   if (insight) out.insight = insight
+  const concept = text(v.concept)
+  if (concept) out.concept = concept
+  const thread = text(v.thread)
+  if (thread) out.thread = thread
+  const voice = text(v.voice)?.toLowerCase()
+  if (voice === 'promo' || voice === 'story') out.voice = voice
   const framework = text(v.framework)?.toLowerCase()
   if (framework && FRAMEWORK_VALUES.has(framework)) out.framework = framework
   const hookType = text(v.hook_type)?.toLowerCase()
@@ -664,10 +670,10 @@ export function narrationSpineFromStory(story: unknown): NarrationSpine | undefi
   const s = normalizeStory(story)
   if (!s) return undefined
   const spine: NarrationSpine = {
-    insight: s.insight, hook: s.hook, hook_type: s.hook_type, framework: s.framework, inner: s.inner,
+    concept: s.concept, thread: s.thread, voice: s.voice, insight: s.insight, hook: s.hook, hook_type: s.hook_type, framework: s.framework, inner: s.inner,
     motif: s.motif, turn: s.turn, ending_image: s.ending_image, quotable: s.quotable, quotable_scene: s.quotable_scene,
   }
-  const hasSpineField = [s.insight, s.inner, s.motif, s.turn, s.ending_image, s.quotable].some(Boolean)
+  const hasSpineField = [s.concept, s.insight, s.inner, s.motif, s.turn, s.ending_image, s.quotable].some(Boolean)
   return hasSpineField ? spine : undefined
 }
 
@@ -678,7 +684,8 @@ export function summarizeRecentStory(draftData: Record<string, unknown>): string
   const story = normalizeStory(draftData.story)
   if (!story) return ''
   const motif = story.motif ? `motif "${story.motif.slice(0, 40)}"` : ''
-  return [story.hook_type, story.framework, motif].filter(Boolean).join(', ')
+  const concept = story.concept ? `concept "${story.concept.slice(0, 90)}"` : ''
+  return [story.hook_type, story.framework, motif, concept].filter(Boolean).join(', ')
 }
 
 /**

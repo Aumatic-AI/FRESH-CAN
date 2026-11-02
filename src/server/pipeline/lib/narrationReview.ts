@@ -91,6 +91,8 @@ export function parseNarrationReview(
 }
 
 export const MAX_REVIEW_REWRITES = 4
+/** Scores under this (of 10) for the hook or the memorable line trigger a rewrite note. */
+export const LOW_SCORE = 7
 
 /** Which scenes the single rewrite may touch, with the notes for each. Plan-level
  *  findings are mapped to the scene that can fix them. A problem only the picture
@@ -100,6 +102,7 @@ export function planReviewRewrites(
   review: NarrationReview,
   lastScene: number,
   spineQuotableScene?: number,
+  firstScene = 1,
 ): { notes: Map<number, string[]>; endingVisualMismatch: boolean } {
   const notes = new Map<number, string[]>()
   const add = (n: number | null | undefined, note: string) => {
@@ -116,6 +119,15 @@ export function planReviewRewrites(
   }
   if (review.quotable && !review.quotable.present) {
     add(review.quotable.scene ?? spineQuotableScene, 'give the video one plain, specific line worth quoting; never a slogan')
+  }
+  // A low score is a finding too: the reviewer is asked to score strictly, and a weak hook or a
+  // forgettable line is rewritten once instead of being recorded and shipped.
+  const { hook, memorable_line: memorable } = review.scores
+  if (typeof hook === 'number' && hook < LOW_SCORE) {
+    add(firstScene, 'sharpen the hook: a specific, curious or funny first line of 12 words or fewer, not a summary of the plan')
+  }
+  if (typeof memorable === 'number' && memorable < LOW_SCORE && !(review.quotable && !review.quotable.present)) {
+    add(review.quotable?.scene ?? spineQuotableScene ?? lastScene, 'make this the one line a viewer would repeat: plain, specific, a little surprising')
   }
   const endingVisualMismatch = review.ending_image_in_final_visual === false
   if (review.last_line_lands_on_ending === false && !endingVisualMismatch) {

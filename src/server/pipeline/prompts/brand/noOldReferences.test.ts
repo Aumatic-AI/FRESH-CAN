@@ -38,7 +38,7 @@ describe('old truck reference photos', () => {
     }
     expect(existsSync(path.join(process.cwd(), 'assets', 'fresh-can', 'truck_exterior_rear_clean.png'))).toBe(false)
     expect(existsSync(path.join(process.cwd(), 'assets', 'fresh-can', 'truck_exterior_rear34_clean.png'))).toBe(false)
-    expect(BRAND_PROFILE.referenceImages.exterior).toHaveLength(1)
-    expect(BRAND_PROFILE.referenceImages.exterior[0].whatItShows).toMatch(/no truck,\s+cab or wheels/)
+    expect(BRAND_PROFILE.referenceImages.exterior).toHaveLength(4)
+    for (const r of BRAND_PROFILE.referenceImages.exterior) expect(r.whatItShows).toMatch(/no truck,\s+cab or wheels/i)
   })
 })

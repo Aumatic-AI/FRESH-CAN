@@ -1540,11 +1540,12 @@ describe('exterior reference photos by view', () => {
     unitPresence: 'featured' as const,
   }
 
-  it('there is exactly one container-only exterior reference, with no fixed view', () => {
+  it('the exterior references are container-only photos; the first is the default anchor with no avoided camera face', () => {
     const pool = BRAND_PROFILE.referenceImages.exterior
-    expect(pool).toHaveLength(1)
-    expect(pool[0].url).toMatch(/container\.png$/)
-    expect(pool[0].whatItShows).toMatch(/no truck,\s+cab or wheels/)
+    expect(pool).toHaveLength(4)
+    expect(pool[0].url).toMatch(/container_1\.png$/)
+    expect(pool[0].cameraFace).toBeUndefined()
+    for (const r of pool) expect(r.whatItShows).toMatch(/no truck,\s+cab or wheels/i)
   })
 
   it('a unit scene edits from the shared character-ref and allows any angle, door shut', () => {
@@ -1654,7 +1655,9 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured', castReferences: [portrait] })
     expect(out.referenceImageUrl).toBe(sceneJob.characterRefUrl)
     // image 1 = this video's own view of the container, image 2 = the real brand photo, portraits after
-    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url, portrait.url])
+    expect(out.extraReferenceImageUrls).toHaveLength(2)
+    expect(BRAND_PROFILE.referenceImages.exterior.map((r) => r.url)).toContain(out.extraReferenceImageUrls![0])
+    expect(out.extraReferenceImageUrls![1]).toBe(portrait.url)
     expect(out.prompt).toContain('Images 1-2 are the location reference')
     expect(out.prompt).toContain('image 3 is the resident')
   })
@@ -1675,7 +1678,8 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
 
   it('changes nothing when no portraits are given (the previous text-only behavior)', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured' })
-    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url]) // only the brand photo, no portraits
+    expect(out.extraReferenceImageUrls).toHaveLength(1) // only one brand photo, no portraits
+    expect(BRAND_PROFILE.referenceImages.exterior.map((r) => r.url)).toContain(out.extraReferenceImageUrls![0])
     expect(out.prompt).not.toContain('Person reference photos')
   })
 })
@@ -1694,17 +1698,20 @@ describe('Part A: reference is identity only, scene is creative', () => {
   it('exterior scene gets two viewpoints (this video\'s own view + the brand photo) and a code-chosen camera position', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, base)
     expect(out.referenceImageUrl).toBe(base.characterRefUrl)
-    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url])
+    expect(out.extraReferenceImageUrls).toHaveLength(1)
+    expect(BRAND_PROFILE.referenceImages.exterior.map((r) => r.url)).toContain(out.extraReferenceImageUrls![0])
     expect(out.prompt).toContain('same container from two different viewpoints')
     expect(out.prompt).toContain('NEW photograph from the camera position given below')
     expect(out.prompt).toMatch(/Camera position for the container: .+\. This overrides any container angle in the shot notes\./)
   })
 
-  it('interior scene attaches every interior photo and says they are two viewpoints of one store', () => {
+  it('interior scene attaches exactly two interior photos and says they are two viewpoints of one store', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...base, setting: 'interior' })
     const interior = BRAND_PROFILE.referenceImages.interior.map((r) => r.url)
     expect(interior).toContain(out.referenceImageUrl)
-    expect(out.extraReferenceImageUrls).toEqual(interior.filter((u) => u !== out.referenceImageUrl))
+    expect(out.extraReferenceImageUrls).toHaveLength(1)
+    expect(interior).toContain(out.extraReferenceImageUrls![0])
+    expect(out.extraReferenceImageUrls![0]).not.toBe(out.referenceImageUrl)
     expect(out.prompt).toContain('same store from two viewpoints')
     expect(out.prompt).toContain('different part of the aisle')
   })

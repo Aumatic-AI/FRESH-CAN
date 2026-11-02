@@ -54,3 +54,33 @@ describe('exterior scenes: different camera per scene, same design', () => {
     expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: 2, setting: 'interior' }).prompt).not.toContain('Camera position for the container')
   })
 })
+
+describe('several container references: dynamic scenes, never a copy of a photo', () => {
+  it('the container photos name distinct camera faces, and a scene never picks its source photo\'s face', () => {
+    const pool = BRAND_PROFILE.referenceImages.exterior
+    const faces = pool.map((r) => r.cameraFace).filter(Boolean)
+    expect(new Set(faces).size).toBe(faces.length)
+    for (const r of pool) {
+      for (let i = 0; i < 60; i++) {
+        const c = pickContainerCamera(`vid${i}`, i % 9, { avoid: r.cameraFace as never })
+        if (r.cameraFace === 'door-end-straight') expect(c).not.toMatch(/^straight-on to the door end/)
+        if (r.cameraFace === 'long-side-straight') expect(c).not.toMatch(/^straight-on to the long wordmark side/)
+        if (r.cameraFace === 'door-end-3q') expect(c).not.toMatch(/^a three-quarter view of the door end/)
+      }
+    }
+  })
+  it('scenes in one video draw different source photos and different cameras, and a retry is stable', () => {
+    const job = { pipelineId: 'vid-x', visualDescription: 'A woman holds her phone beside the container', shotNotes: null, characterRefUrl: 'https://example.com/ref.png', unitPresence: 'featured' as const }
+    const outs = Array.from({ length: 12 }, (_, i) => composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: i + 1 }))
+    const sources = new Set(outs.map((o) => o.extraReferenceImageUrls![0]))
+    expect(sources.size).toBeGreaterThanOrEqual(3)
+    const cams = new Set(outs.map((o) => /Camera position for the container: (.+?)\. This/.exec(o.prompt)![1]))
+    expect(cams.size).toBeGreaterThan(5)
+    expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: 5 }).prompt).toBe(outs[4].prompt)
+  })
+  it('every reference is described as a design guide only (never an angle, background or lighting)', () => {
+    for (const r of BRAND_PROFILE.referenceImages.exterior) expect(r.whatItShows).toMatch(/never its angle|design guide only|only for the container's design/i)
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { pipelineId: 'v', sceneNumber: 2, visualDescription: 'x', shotNotes: null, characterRefUrl: 'https://example.com/r.png', unitPresence: 'featured' })
+    expect(out.prompt).toMatch(/do not reuse either photo's angle, framing, background or people/)
+  })
+})

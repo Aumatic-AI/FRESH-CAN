@@ -59,6 +59,29 @@ export const BRAND_PROFILE: BrandProfile = {
     'plans change',
     'meant for nobody else',
     'for nobody else',
+    // Generic lifestyle-ad language (knowledge base §6A.4; the owner's list)
+    'fuss', 'agenda', 'vibe', 'little moment', "life's little pleasures", 'main character energy',
+    'a whole new level', "it's the little things", 'more than just', 'because you deserve it',
+    'fresh feels', 'making memories', 'make memories', 'treat yourself', 'hits different',
+    "chef's kiss", 'a breath of fresh air', 'best life', 'next level',
+    // Literary / scene-painting words that are not Reel-easy
+    'detour', 'drift', 'bitten', 'linger', 'whisper', 'glimmer', 'cascade', 'tapestry', 'symphony', 'unfold',
+    'savour', 'amble', 'wander', 'dappled', 'golden hour', 'bathed in', 'kissed by',
+    // French
+    'petits plaisirs', 'une nouvelle dimension', 'parce que vous le méritez', 'parce que tu le mérites',
+    'créer des souvenirs', 'sans tracas', 'sans chichi', "ce sont les petites choses", 'plus qu’un simple',
+    "plus qu'un simple", 'un vent de fraîcheur',
+  ],
+  narrationVaguePhrases: [
+    'the whole reason', 'to count', 'world go by', 'world pass', 'watches the world', 'nothing needs',
+    'for once', 'simply because', 'quite happy', 'wants one thing after another', 'what happens after',
+    'something passing', 'already finding', 'already thinking', 'looking forward to', 'no particular reason', 'nowhere to be', 'all that matters',
+    // French
+    'tout simplement parce que', 'regarde le monde', 'pour une fois', 'nulle part où être',
+  ],
+  narrationAbstractNouns: [
+    'happiness', 'joy', 'togetherness', 'freshness', 'memories', 'connection', 'belonging',
+    'bonheur', 'joie', 'fraîcheur', 'souvenirs', 'convivialité',
   ],
   narrationBannedOpeners: [
     'in a world where', 'imagine', 'meet ', 'introducing', 'picture this',
@@ -280,14 +303,59 @@ export const BRAND_PROFILE: BrandProfile = {
   referenceImages: {
     exterior: [
       {
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container.png',
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container_1.png',
         whatItShows:
-          'A standalone maroon shipping container resting on the ground, seen from a front three-quarter ' +
-          'angle: the end face with the black-frame glass double door and one small white square QR panel ' +
-          'beside it, and the long side panel as one solid, unbroken corrugated maroon wall carrying a ' +
-          'single "Fresh CAN" wordmark — reproduce that exact wordmark faithfully, once. There is no truck, ' +
+          'A standalone red shipping container resting on the ground, seen from a front three-quarter angle: ' +
+          'the end face on the left with the black-frame glass double door, one small white square QR panel ' +
+          'beside the door, two small floodlights at the top corners and a small white sensor box centred above ' +
+          'the door; the long side panel on the right is one solid, unbroken corrugated wall carrying a single ' +
+          'white "Fresh [maple leaf icon] CAN" wordmark — reproduce that exact wordmark faithfully, once. There is no truck, ' +
           'cab or wheels. Use it only for the container\'s design, never its angle, background or lighting.',
-        disregard: [],
+        disregard: [
+          'the glass office building, trees, hedges and paved plaza behind the container',
+          'the photo\'s brighter, sun-lit red: the container\'s true colour is the brand maroon (#6B1A1A)',
+          'the particular goods visible through the glass door',
+        ],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container_2.png',
+        whatItShows:
+          'The same container from the opposite front three-quarter angle: the long solid wordmark side fills ' +
+          'the left and centre, and the door end is on the right with its black-frame glass double door, the ' +
+          'small white QR panel beside the door, two small floodlights at the top corners and the small white ' +
+          'sensor box above the door. One white "Fresh [maple leaf icon] CAN" wordmark on the long side, reproduced faithfully, ' +
+          'once. No truck, cab or wheels. A design guide only, never its angle, background or lighting.',
+        cameraFace: 'door-end-3q',
+        disregard: [
+          'the trees, glass building, hedges, paving and dappled shadows around the container',
+          'the photo\'s brighter, sun-lit red: the container\'s true colour is the brand maroon (#6B1A1A)',
+          'the particular goods visible through the glass door',
+        ],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container_3.png',
+        whatItShows:
+          'The door end seen straight-on at ground level: the black-frame glass double door with two black pull ' +
+          'handles centred in a plain end face, two small floodlights at the top corners and a small white ' +
+          'sensor box above the door; no wordmark on this face. The small white QR panel beside the door is not ' +
+          'visible in this photo but still belongs there. No truck, cab or wheels. A design guide only, never its ' +
+          'angle, background or lighting.',
+        cameraFace: 'door-end-straight',
+        disregard: [
+          'the glass buildings, trees, hedges and paved plaza behind the container',
+          'the photo\'s brighter, sun-lit red: the container\'s true colour is the brand maroon (#6B1A1A)',
+          'the particular goods and plants visible through the glass door',
+        ],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container_4.png',
+        whatItShows:
+          'The long side seen straight-on: one solid, unbroken corrugated deep-maroon wall with a single centred ' +
+          'white "Fresh [maple leaf icon] CAN" wordmark, reproduced faithfully, once, and two dark rectangular forklift pockets ' +
+          'along the bottom rail; no door or opening on this side. No truck, cab or wheels. A design guide only, ' +
+          'never its angle, background or lighting.',
+        cameraFace: 'long-side-straight',
+        disregard: ['the glass buildings, trees, hedges and paved plaza behind the container'],
       },
     ],
     interior: [
@@ -306,6 +374,45 @@ export const BRAND_PROFILE: BrandProfile = {
           'fridges and their red Fresh CAN header signs filling most of the frame on the left and a ' +
           'stainless sink and counter visible near the white door ahead.',
         disregard: [],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/freshcan_interior_3.png',
+        whatItShows:
+          'Camera just inside the entrance looking straight down the aisle toward a plain white door at the far ' +
+          'end: black metal shelving with wood-tone shelves on both sides stocked with bagged and jarred ' +
+          'groceries, a rustic wood-clad counter at the left front, wooden crates of fresh produce on the ' +
+          'right, trailing green plants on top of the shelves, strip lights and a wall-mounted air-conditioning ' +
+          'unit on the ceiling, and a warm wood-look floor.',
+        disregard: [
+          'the edges of the glass entrance doors and their black handles at both sides of the frame',
+          'the exact packaged goods, labels and brands on the shelves: fill shelves with plain, unlettered goods',
+          'the warm golden tint of the lighting',
+        ],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/freshcan_interior_4.png',
+        whatItShows:
+          'Camera inside the aisle looking toward a plain white door at the far end: black metal shelving with ' +
+          'wood-tone shelves on both sides stocked with bagged snacks, jars and cardboard boxes, trailing plants on ' +
+          'top of the shelves, strip lights and a wall-mounted air-conditioning unit on the ceiling, and a ' +
+          'wood-look floor.',
+        disregard: [
+          'the red "Fresh CAN" lettering on the right-hand wall: never reproduce wall lettering or any sign',
+          'the small watermark in the top-right corner',
+          'the sun-dappled leaf shadows on the wall and the exact packaged goods and labels',
+        ],
+      },
+      {
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/freshcan_interior_5.png',
+        whatItShows:
+          'A close-up of one stocked shelf bay with no aisle in view: black metal frame, wood-tone shelves lit by ' +
+          'a warm strip under the shelf above, glass jars of sauce, pesto, pasta and legumes, plain kraft paper ' +
+          'pouches, a wicker basket, cardboard boxes and a trailing green plant. Use it for the texture and ' +
+          'feel of the shelving and goods, not as a composition.',
+        disregard: [
+          'the specific jars, pouches and products: fill shelves with plain, unlettered goods',
+          'the under-shelf glow and the shallow close-up framing',
+        ],
       },
     ],
   },

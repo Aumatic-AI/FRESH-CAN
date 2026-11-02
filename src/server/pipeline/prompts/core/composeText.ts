@@ -485,19 +485,36 @@ function recentStoriesClause(recent: readonly string[] | undefined): string {
 // to tell instead of one line per picture.
 const STORY_CRAFT_CLAUSE =
   'STORY CRAFT, also silent. Act as an award-winning commercial director and the social lead of a loved ' +
-  'brand: correct but forgettable is a failure. (a) Insight: state in one line the small human truth under the ' +
-  'idea (e.g. kids remember small rituals, not big days). (b) Sketch three concepts that all keep the idea, ' +
-  'each built on a different device (a straight heartfelt story, a reveal or point-of-view version, a light ' +
-  'humour version), score them 1-5 on surprise, emotional pull, shareability, faithfulness to the idea, brand ' +
-  'truth and producibility, and shoot the boldest one that scores at least 4 on faithfulness, brand truth and ' +
-  'producibility: bold never beats true. (c) Pick ONE framework from small_quest, pressure_cooker, ' +
+  'brand: correct but forgettable is a failure. (a0) If the idea already contains written voiceover or ad copy (quoted lines, a "Voiceover:" block, ad-style ' +
+  'sentences), that copy IS the concept: keep its opening question or line, its promises and its rhythm, tighten ' +
+  'it to fit the scenes, and do not replace it with an invented character, incident or object; brand and safety ' +
+  'rules still win (no "Imagine", "Meet", entering or exiting words, "Fresh-CAN" spelling, no invented claims). ' +
+  '(a) Otherwise the typed idea is RAW MATERIAL, not the finished story. First turn it into a catchier, more creative story ' +
+  'by tweaking it: keep its subject, its people and anything the creator explicitly required or ruled out, but change the ' +
+  'angle, the twist, the situation or the point of view so it becomes something a stranger would stop scrolling for ' +
+  '(an unexpected reason, a funny misunderstanding, a reversal, sharper small stakes). Never tweak away a stated ' +
+  'constraint, and never break brand truth. Write the result as "concept": two plain sentences. EVERY scene and ' +
+  'every narration line is built around this concept, not around the raw idea. (b) Insight: state in one line the ' +
+  'small human truth under the concept. Sketch three genuinely different takes on the idea (not three tones of the ' +
+  'same story), score them 1-5 on surprise, catchiness for a Reel, shareability, faithfulness to the idea\'s core, ' +
+  'brand truth and producibility, and shoot the boldest one that scores at least 4 on faithfulness, brand truth and ' +
+  'producibility: bold never beats true. A different idea must give a differently shaped story each time. ' +
+  '(b2) Write the story fields (hook, inner, turn, motif, ending_image, quotable) in plain everyday words about ' +
+  'concrete actions, as a person would say them out loud; no poetic imagery (no "a bitten strawberry", "follows ' +
+  'something passing", "quiet resting foot"). The ending_image is one simple thing a person does or sees. ' +
+  '(b3) Choose the narration voice. Default to "promo". Use "promo" for any idea that shows Fresh-CAN\'s ' +
+  'convenience, how it fits into a day, a product or produce showcase, a queue or errand gag, a trend or ' +
+  'fast-cut promo style, or that otherwise reads like a social ad: the voiceover then speaks to the viewer as ' +
+  '"you" and the picture carries the person. Use "story" ONLY when the idea centres on a specific relationship, ' +
+  'memory or emotional moment (a grandparent\'s recipe, a first time, a family ritual). When unsure, choose "promo". ' +
+  '(c) Pick ONE framework from small_quest, pressure_cooker, ' +
   'time_machine, demo_drop, educator, origin_story, myth_killer, countdown, cliffhanger, pas, bab, pixar_spine ' +
   '(small_quest unless the idea fits another better). (d) Hook: draft four openers across at least three of ' +
   'story_open, small_problem, pov, result_first, question, teach, callout, pattern_interrupt, number_list, ' +
-  'confession; keep the most specific one that can be paid off by the last scene, with the opening picture and the ' +
+  'confession; keep the most specific one that can be paid off by the last scene, recorded in story.hook as the SPOKEN first line itself (plain words, 12 or fewer), with the opening picture and the ' +
   'opening line saying the same thing, an action already under way in the first frame, and never a logo or the ' +
   'container alone. (e) Give the lead character one want and one small worry (inner), a turn where something ' +
-  'changes, and ONE recurring object or gesture (motif) that returns, in a new form, near the end. (f) Choose the ' +
+  'changes, and ONE recurring object or gesture (motif) that returns, in a new form, near the end (in a "promo" voice the motif is a picture-only detail and is never spoken), and one small running thread (an idea that comes back two or three times, never in every scene). (f) Choose the ' +
   'ending_image: a concrete, feeling-led final picture, not a summary or slogan, and make the final scene\'s ' +
   'visual_description actually show it. (g) Decide the one line worth quoting: plain and specific, never a ' +
   'slogan, and which scene it lands in. (h) Give every scene a story_role (hook, context, turn, payoff or ' +
@@ -771,7 +788,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
   const preamble = opts.sceneNotes
     ? `Build this video's story and every one of its scenes around the user's own creative idea: ` +
       `"${opts.sceneNotes}". This idea alone decides what the video is about and what happens in it — ` +
-      `never blend in or substitute a different topic. ${brand.neutralIdentityLine ?? brand.missionStatement} ` +
+      `never blend in or substitute a different topic. The idea fixes the subject and anything it requires; HOW it is told is yours to make catchier and more creative (see STORY CRAFT). ${brand.neutralIdentityLine ?? brand.missionStatement} ` +
       `That is background context for tone and brand accuracy only: a fixed constraint on how the brand's ` +
       `container, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
       `second angle, and never a reason to insert brand or mission messaging into a scene the idea doesn't ` +
@@ -793,7 +810,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '  "script": string (the full narration/voiceover text, human-readable, in English, for internal review only),\n' +
     '  "visual_description": string (one-paragraph overview of the video\'s overall visual concept),\n' +
     '  "duration_seconds": number (total estimated runtime, summing the scenes below),\n' +
-    '  "story": { "hook": string, "arc": string, "resolution": string, "cta": string or null, "insight": string, ' +
+    '  "story": { "hook": string (the SPOKEN first line a viewer hears, in plain words, 12 or fewer, never a description of the picture), "arc": string, "resolution": string, "cta": string or null, "concept": string (the tweaked story in two plain sentences), "voice": "promo" or "story" (see the voice rule), "thread": string (one small running idea that returns two or three times, never every scene), "insight": string, ' +
     '"framework": string (one of the framework keys above), "hook_type": string (one of the hook types above), ' +
     '"inner": string, "motif": string, "turn": string, "ending_image": string, "quotable": string (the idea of ' +
     'the line worth quoting, not final wording), "quotable_scene": number } (a compact summary of your planning ' +
@@ -953,6 +970,8 @@ export interface LocalizeScriptSystemPromptOptions {
   /** The plan's story spine, when it has one. Without it the prompt is the
    *  same as before the spine existed. */
   spine?: NarrationSpine
+  /** First lines of recent videos, so this one opens differently. */
+  recentOpeners?: readonly string[]
 }
 
 /** Brand-owned clichés for how a video opens and closes (rule G4). */
@@ -965,16 +984,27 @@ function narrationOpenersLine(brand: BrandProfile): string {
   )
 }
 
+function recentOpenersBlock(recent: readonly string[] | undefined): string {
+  const list = (recent ?? []).map((r) => r.trim()).filter(Boolean).slice(0, 5)
+  if (list.length === 0) return ''
+  return (
+    ' Recent videos opened with these lines (newest first): ' + list.map((r) => `"${r}"`).join(' | ') +
+    '. Open this one differently: another kind of first move, other words, another rhythm.'
+  )
+}
+
 /** The story the narration is written to tell. Notes for the writer, never wording to copy. */
 function storySpineBlock(spine: NarrationSpine | undefined, language = 'English'): string {
   if (!spine) return ''
   const items: [string, string | number | undefined][] = [
+    ['the story concept (build everything around this)', spine.concept],
     ['insight', spine.insight],
     ['hook idea', spine.hook],
     ['hook type', spine.hook_type],
     ['framework', spine.framework],
     ["the lead's inner life", spine.inner],
-    ['motif', spine.motif],
+    ['running thread (returns two or three times, never every scene)', spine.thread],
+    ['motif', spine.voice === 'promo' ? undefined : spine.motif],
     ['turn', spine.turn],
     ['ending image', spine.ending_image],
     ['line worth quoting (the idea, not wording)', spine.quotable],
@@ -984,28 +1014,35 @@ function storySpineBlock(spine: NarrationSpine | undefined, language = 'English'
   if (lines.length === 0) return ''
   return (
     ' STORY SPINE. This is the plan for the whole video; write the narration to tell THIS story, as notes and ' +
-    `never wording to copy. ${lines.join('. ')}. Each scene also carries story_role (its job in the arc) and ` +
+    `never wording to copy; the notes may be written in a more literary register than the narration, so restate them in plain spoken words. ${lines.join('. ')}. Each scene also carries story_role (its job in the arc) and ` +
     '"adds" (what its line must carry that the picture cannot show). Rules: the first scene\'s line is the ' +
     'hook: at most 12 words when its word band allows, the key image first, opening a small question the last scene ' +
     'answers. Every line adds something new (a thought, a memory, a worry, a reason); none only describes the picture ' +
-    'and no two scenes take the same angle. Tell the lead\'s inner life in the third person (what she wonders, ' +
-    'remembers or worries about), never as "I". The motif is named early and comes back near the end in a new form: ' +
-    'the same thing, not necessarily the same words. Place the one line worth quoting in its scene: plain, specific ' +
+    'and no two scenes take the same angle. ' +
+    (spine.voice === 'promo'
+      ? 'This is a PROMO voiceover: speak to the viewer as "you", never about the lead\'s inner life, and never mention props, colours or small details that only the picture shows. '
+      : 'Tell the lead\'s inner life in the third person (what she wonders, remembers or worries about), never as "I". The motif is named early and comes back near the end in a new form: the same thing, not necessarily the same words. ') +
+    'Place the one line worth quoting in its scene: plain, specific ' +
     'and speakable, never a slogan. The last line lands on the ending image as a small concrete moment that matches ' +
     'what the final scene shows. Where a scene\'s picture says it all, use the low end of its word band, but never in ' +
     'more than two scenes, so the video keeps its length.' +
-    (language === 'French' ? FRENCH_SPINE_CLAUSE : '')
+    (language === 'French' ? frenchSpineClause(spine.voice === 'promo') : '')
   )
 }
 
 // French keeps the story, not the English sentences (knowledge base §6.3:
 // write natively, never translate idioms literally).
-const FRENCH_SPINE_CLAUSE =
+const frenchSpineClause = (promo: boolean) =>
   ' FRENCH. Adapt the story, do not translate it word for word. The approved English is the story to keep (same ' +
   'facts, same turn, same feeling); write it as a native speaker would say it aloud, in natural French for a ' +
-  'Canadian audience, with no anglicisms and no English idiom carried over. The narrator stays in the third person ' +
-  '(il, elle, ils; never je, nous or on as the storyteller). Keep the hook short and specific with its key image ' +
-  'first. Keep the motif as the same object or gesture, using the natural French word for it. Do not translate the ' +
+  'Canadian audience (Canadian vocabulary: faire l\'épicerie, courriel, cellulaire, fin de semaine; never France-only ' +
+  'terms), with no anglicisms and no English idiom carried over. ' +
+  (promo
+    ? 'The voiceover speaks to the viewer with "tu" and "ton/ta/tes" (casual, never "vous"), and never says je, nous or on as the storyteller.'
+    : 'The narrator stays in the third person (il, elle, ils; never je, nous or on as the storyteller).') +
+  ' Keep the hook short and specific with its key image ' +
+  'first. Keep the voice\'s personality and rhythm: recreate the wit, the flow and the observation in French as a ' +
+  'Canadian copywriter would write them (joined thoughts, not a row of full-stop slogans), even when the words differ. Keep the motif as the same object or gesture, using the natural French word for it. Do not translate the ' +
   'quotable line literally: write the line that would be quotable in French with the same meaning. Keep the ' +
   'ending image exactly as an image. Fit each scene\'s French word band, which is counted in French words.'
 /**
@@ -1055,6 +1092,7 @@ const FRENCH_SPINE_CLAUSE =
  * length and fixing it wouldn't have changed either real job's outcome.
  */
 export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: LocalizeScriptSystemPromptOptions): string {
+  const promo = opts.spine?.voice === 'promo'
   const wordsPerSecond = opts.wordsPerSecond ?? NARRATION_WORDS_PER_SECOND
   return (
     `${brand.missionStatement} Voice: ${brand.voiceGuidelines}${bannedWordsLine(brand)}\n\n` +
@@ -1084,28 +1122,91 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'QR code identifies rather than pays, or that nothing is scanned) once across the whole video, in the scene ' +
     'it fits best, and keep the other scenes free of repeated disclaimers. ' +
     (opts.sceneNotes
-      ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it, and any ` +
+      ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it. If it contains written voiceover or ad copy, build the narration from ` +
+        'those lines (keep its opening question and its best phrases, adapted to each scene\'s word band), while the ' +
+        'brand and safety rules below still win. Any ' +
         'action it rules out (for example "no scanning") never appears in the wording. '
       : '') +
-    'HUMAN VOICE. One unseen storyteller tells the whole video, the way a warm, observant person would tell it ' +
-    'aloud to a friend, in a plain, polished register. The storyteller is NOT a character and NOT the company: never say "I", "we", "our", "us" ' +
-    'or "my" — only "he", "she", "they", the people\'s role or relationship, and plain third-person narration. ' +
-    'Never quote dialogue (people do not speak on camera); say what they said or felt instead. Sound like speech, ' +
-    'not a report: contractions, sentences of different lengths, the occasional question, complete ' +
-    'sentences with a verb. REGISTER: warm and clear, like a well-written brand film voiceover — everyday words, ' +
-    'never slang, banter, jokes or chatty asides ("honestly", "to be fair"), and never ornate or riddle-like ' +
-    'either: allow at most ONE gentle figurative touch in the whole video, and cut any line a listener would ' +
-    'have to decode or that sounds like a literary flourish; say a feeling plainly (for example that they smile at ' +
-    'each other) instead of inventing a poetic way to put it. Do NOT write telegraphic fragments, bare lists of items, semicolons or colons, and no ' +
-    'more than one "X, not Y" turn in the whole video. Prefer one specific, concrete detail the viewer cannot see ' +
+    'HUMAN VOICE. One unseen storyteller tells the whole video, the way a sharp, warm, observant person would tell it ' +
+    'aloud to a friend: a catchy, plain-spoken Reel copywriter, not a poet. The ' +
+    (promo
+      ? 'storyteller is NOT a character and NOT the company: never say "I", "we", "our", "us" or "my". It speaks ' +
+        'to the viewer as "you" (see PROMO VOICE). '
+      : 'storyteller is NOT a character and NOT the company: never say "I", "we", "our", "us" or "my", only "he", "she", ' +
+        '"they", the people\'s role or relationship, and plain third-person narration. ') +
+    'Never quote dialogue (people do not speak on camera). ' +
+    (promo
+      ? 'PROMO VOICE. This is a punchy social ad voiceover, not a story about a character. Speak to the viewer as ' +
+        '"you" and "your". Open with a relatable truth or question about the viewer\'s own moment (the thing they ' +
+        'have all felt), then bring Fresh-CAN in as the hero line, said once, with a quick run of what it takes away ' +
+        '(no queue, no wait) and what it gives (fresh produce, close by), without explaining how it works. The ' +
+        'picture already shows the person: never narrate what they are doing or feeling, and mention them only if a ' +
+        'line truly needs it (a funny observation about what is on screen is fine, a description is not). Use ' +
+        'rhythm and wit: a short run like "no X, no Y", a playful observation, one line a viewer would quote, and a ' +
+        'closing line that calls back to the opening, never an invented tagline or slogan and never "Meet", ' +
+        '"Introducing" or "Imagine". '
+      : '') +
+    'REEL STORY. This is a mini-story people watch to the end on Instagram, not a description. The quality bar is ' +
+    'fixed, the shape is NOT: it must hook, give something new on every line, and pay off the hook. Everything ' +
+    'else comes from THIS idea. Choose the shape that suits it (a reveal held back until late, a question the ' +
+    'video answers, a funny misunderstanding, a quiet confession, a countdown, a before-and-after, a running ' +
+    'joke, a single odd observation that grows) and let the people and situation decide the tone and the ending ' +
+    '(a laugh, a surprise, a warm beat, a clean stop). Two videos from this brand must never feel like the same ' +
+    'story with new nouns: do not default to "problem, then Fresh-CAN solves it, then a smile", do not repeat a ' +
+    'stock opening move or a stock closing move, and if your first idea is the obvious one, find the angle ' +
+    'nobody would expect from this idea. The Fresh-CAN step is whatever the story naturally needs it to be. Cut ' +
+    'any line that only sets a mood. ' +
+    'CATCHY. This is a Reel ad people should want to hear twice, so write it the way a sharp copywriter would. ' +
+    'Open with the planned hook type as a spoken line: a question about a small familiar annoyance, a number ' +
+    'promise ("three of X, one Y", counting only things this story really shows, never a statistic), a confession, a gentle callout, the result first, or a small story opener. Put ' +
+    'the most specific image first and make the last line pay the hook off, ideally by calling back to its words ' +
+    'or its count. In the body give each line a new small payoff: a relatable habit named exactly, a tiny ' +
+    'surprise, an unexpected but plain comparison, or a gentle rule of three. Never let a line merely say what ' +
+    'she is doing or thinking ("she picks up an apple, already finding new uses"): say why it is funny, true or ' +
+    'tempting. Do not give every scene the same sentence shape (for example "she picks X, thinking Y"). The brand ' +
+    'name sits inside a sentence that is about the story ("Fresh-CAN has the apples, and one of them has plans"), ' +
+    'never "At Fresh-CAN, she...". End on a short button line that is specific and a little surprising, not a ' +
+    'summary. ' +
+    'UNDERSTANDABLE. Every line must make sense to a stranger who hears only the narration at scroll speed. Never ' +
+    'refer to a prop, colour, object or detail that only the picture shows (no "that yellow clip", "the tote"), ' +
+    'never use insider shorthand ("a heel of bread", "a restock"), and never call back to something no earlier ' +
+    'line introduced in plain words. Say each idea once: a key phrase (for example "a whole trip") appears at ' +
+    'most twice in the whole video, as the hook and as the payoff, and no word is leaned on in four scenes. ' +
+    'Avoid "X is for Y, not Z" definitions of the brand and any line that sounds clever but needs decoding. ' +
+    'SPECIFIC. Every line states something concrete: who does what, or one specific thought with a detail. Cut ' +
+    'vague reflective filler ("that can be the whole reason", "the world passes by", "doesn\'t need to count"). Each ' +
+    'scene is a new step: two scenes must never carry the same beat (for example two "she relaxes" lines). The ' +
+    'first line is a real hook in 12 words or fewer, a specific and curious situation, never a summary of her mood. ' +
+    'PLAIN WORDS. A viewer hears this once, at scroll speed, so every line must be understood on the first listen: ' +
+    'the words you would use texting a friend, short common words, one clear idea. No literary or scene-painting ' +
+    'imagery (nothing like "a detour", "a bitten strawberry", "leaves drifting"): say what happens or what she ' +
+    'thinks in plain terms. Do not narrate props, weather or small objects as symbols. Catchy comes from a clear ' +
+    'thought and an easy rhythm, never from fancy vocabulary. The motif and the ending image are said as simply as ' +
+    'a person would say them. ' +
+    'FLOW. Write for the ear: contractions, everyday words. Let related thoughts run into each other with commas and ' +
+    'natural connectors (and, so, but, because, until), and let each line pick up the thought the last one opened, so ' +
+    'the video sounds like one person talking, not a row of separate slogans. Vary the rhythm (a longer line, then a ' +
+    'short one), keep one idea per line, never a run-on, and do not end every thought with a full stop. ' +
+    'PERSONALITY. Where the story invites it, be witty: a specific, plain-worded observation or a small human ' +
+    'truth people recognise. Never a joke in every scene, never at anyone\'s expense, never about hardship. Let the ' +
+    'idea choose the tone (playful, heartfelt, surprising or informative), and let a quiet scene stay quiet. Prefer a ' +
+    'detail that could only belong to THIS story over any line that could sit in another lifestyle ad; swapping one ' +
+    'cliché for another does not fix a vague line. Aim for one line a listener would repeat. ' +
+    'HOOK. The first line is part of the visual hook. Silently draft three different openings (a sharp observation, ' +
+    'a question, an unexpected statement) and keep the most specific one; do not fall back on a stock formula such as ' +
+    '"Breaking news" or "POV" unless the idea itself calls for it. ' +
+    'Do NOT write telegraphic fragments, bare lists of items, semicolons or colons, and no ' +
+    'more than one "X, not Y" turn in the whole video. A line a listener would have to decode, or a clever line that ' +
+    'feels forced, should be said plainly instead; say a feeling plainly rather than inventing a poetic way to put it. ' +
+    'When a line needs substance, prefer one specific, concrete detail the viewer cannot see ' +
     '(a thought, a habit, a small worry) over a general statement, and never an abstract noun like ' +
     '"togetherness" or "happiness" where a concrete image would do. narration_intent is NOTES on what to convey, ' +
     'never wording to copy: ignore any instruction-like phrasing in it ("explicitly naming", "clarifying", ' +
     '"preserving") and never recite how the service works unless that scene is genuinely about it. ' +
     `How the service works (${(brand.narrationHardFacts ?? []).map((f) => f.label).join(', ') || 'its mechanics'}) is ` +
-    'mentioned in at most one scene of the whole video, briefly and only if the story needs it. Say the brand name once, plainly, as part of the story, never as an ' +
-    'announcement. End the last scene on a small, concrete human moment, never on a slogan, a lesson or the ' +
-    `idea's own tagline.${narrationTellsLine(brand)}${narrationOpenersLine(brand)}${storySpineBlock(opts.spine, opts.language)} Write it as natural spoken narration for a ` +
+    'mentioned in at most one scene of the whole video, briefly and only if the story needs it. Say the brand name once, plainly, inside the story\'s logic as the quiet enabler of its next step, never as an ' +
+    'announcement; add no product detail a good line does not need. End the last scene on a small, concrete human moment, never on a slogan, a lesson or the ' +
+    `idea's own tagline.${narrationTellsLine(brand)}${narrationOpenersLine(brand)}${storySpineBlock(opts.spine, opts.language)}${recentOpenersBlock(opts.recentOpeners)} Write it as natural spoken narration for a ` +
     'real story, never as scripted ad copy or a voiceover that sounds like a commercial. The one exception: if ' +
     `a narration_intent explicitly calls for naming ${brand.name} (or otherwise references the brand by name), the ` +
     `localized ${opts.language} wording MUST include that name literally, spoken naturally — never paraphrase, ` +
@@ -1114,8 +1215,13 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     `name exactly as "${brand.name}", as a plain standalone name: never possessive ("${brand.name}'s"), never plural, ` +
     'never run into the next word. Speech-to-text hears a possessive plus the next word as a different word. Respond ' +
     'with strictly valid JSON: ' +
-    '{ "scenes": [ { "scene_number": number, "narration_text": string } ] }, exactly one entry per scene given, ' +
-    'in the same order, using the given scene_number values unchanged.'
+    '{ "plan": { "approaches": [string, string, string], "chosen": string, "thread": string }, ' +
+    '"scenes": [ { "scene_number": number, "narration_text": string } ] }. Fill "plan" FIRST, in a few plain words each: ' +
+    'three genuinely different ways to tell this story aloud, the one you chose (best hook, personality, momentum and ' +
+    'ending), and the small running thread it uses. Then write every scene together as one continuous telling, each ' +
+    'line growing out of the one before it, and read the whole thing aloud in your head before answering: anything ' +
+    'that sounds written, repeated or abstract gets rewritten. When only some scenes are given to rewrite, "plan" may ' +
+    'be omitted. Exactly one scenes entry per scene given, in the same order, using the given scene_number values unchanged.'
   )
 }
 
@@ -1125,8 +1231,9 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
  * each scene shows, and returns scores, auto-fail flags and a few concrete
  * fixes. Never blocks anything: the creator still reads and approves.
  */
-export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { language?: string } = {}): string {
+export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { language?: string; voice?: 'promo' | 'story' } = {}): string {
   const french = opts.language === 'French'
+  const promo = opts.voice === 'promo'
   return (
     (french
       ? 'The narration under review is the FRENCH track of a video whose approved English narration is given as ' +
@@ -1136,6 +1243,13 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
         'turn is lost or added; and it reads as natural spoken French, not translationese or an anglicism. Add ' +
         '"native": 0-10 to scores, and use the kind "mistranslation" for a line that changes the English meaning. ' +
         'The narrator never says je, nous or on as the storyteller.\n\n'
+      : '') +
+    (promo
+      ? 'This video uses the PROMO voice: the voiceover speaks to the viewer as "you", so second person is correct ' +
+        'and is never a defect. Judge it as direct-address ad copy: a relatable opening about the viewer, Fresh-CAN ' +
+        'as the hero line once, wit and rhythm, and a closing line that calls back to the opening. Narrating what ' +
+        'the person on screen does or feels, a recital of how the service works, or an invented tagline are defects. ' +
+        'Ignore the third-person and inner-life points below.\n\n'
       : '') +
     'You are a creative QA lead for a warm, community-first Canadian grocery brand. You review the voiceover of ' +
     'a short video against its story plan. You judge the narration only. You will be given the story spine (notes ' +
@@ -1150,20 +1264,43 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
     'which scene should carry it. (6) QUOTABLE: one plain, speakable line worth quoting exists, never a slogan. ' +
     '(7) ENDING: first compare the spine\'s ending_image with the FINAL scene\'s on_screen text and say whether that ' +
     'scene actually shows it; then say whether the final narration line lands on that image as a small concrete ' +
-    'moment. (8) Voice and dignity: warm, plain, no pity, no lecture, no slang.\n\n' +
+    'moment. (8) Voice and dignity: warm, conversational, no pity, no lecture, no humour at anyone\'s expense. ' +
+    '(9) FLOW: it sounds like one person talking, related thoughts joined with commas and connectors, each line ' +
+    'picking up the last, not a row of stand-alone full-stop slogans; also not one long run-on. (10) PERSONALITY: a ' +
+    'specific, witty or human observation where the story invites it, not a joke in every scene. Judge it against ' +
+    'interchangeable lifestyle-ad copy: a line that could sit unchanged in any other grocery or lifestyle ad is a ' +
+    'scene_issue, even without a stock phrase. (11) BRAND FIT: the brand name is said once, inside the story\'s ' +
+    'logic as the quiet enabler of the next step, not as an interruption or a feature announcement. The ' +
+    'voice is allowed to be playful; never mark wit down. CONTINUITY: each line should grow out of the previous one, ' +
+    'and no two scenes should carry the same emotional beat (for example two lines that both say she is relaxing); ' +
+    'flag a scene that repeats an earlier beat or reads as an unrelated caption. (12) REEL STORY: would a viewer stay to the end? A hook, something new every line, a payoff; flag lines that ' +
+    'only set a mood, and flag a story that follows the generic "problem, Fresh-CAN fixes it, smile" template ' +
+    'instead of an angle specific to this idea. (13) PLAIN WORDS: flag any line a listener would not ' +
+    'understand instantly at scroll speed: poetic or literary wording, scene-painting imagery, symbolic objects, ' +
+    'uncommon words. Fix it with the everyday way to say it.\n\n' +
     'The creator\'s own idea for the video is given as "creator_idea". Anything it states (a time of day, a person\'s ' +
     'job, an everyday detail) is NOT invented, so never flag it; a place name, price, saving, count or claim still ' +
     'fails whatever the idea says. The spine is the writer\'s planning notes, not narration: judge only the words in ' +
     'each scene\'s narration_text.\n\n' +
-    'AUTO-FAIL kinds (flag whatever the score): invented_fact (any number, price, saving, count, date or place not ' +
+    'AUTO-FAIL kinds (flag whatever the score): invented_fact (a count of things the video itself shows is not an invented fact, but any other number, price, saving, count, date or place not ' +
     `in the real facts or the creator's idea, which are: ${brand.statistics.length > 0 ? brand.statistics.join(' | ') : 'none'}), ` +
     `fake_testimonial, place_name (any city, province or neighbourhood; "Canada" is allowed), competitor, crossing ` +
     '(someone entering, stepping into, walking out of or exiting the unit), cashier_or_checkout (a cashier, till, ' +
     'queue to pay or per-item scanning), vehicle (a truck, arriving, driving or parking), talking_on_camera ' +
     '(quoted dialogue), contradicts_picture (narration that conflicts with on_screen), hook_unpaid. ' +
     'Also flag the brand name if it is said more than once, or possessively.\n\n' +
+    'SCORE STRICTLY, as a copy chief would. A correct, ordinary line is a 5 or 6. Give the hook 8 or more only if a ' +
+    'stranger scrolling would stop for it (specific, curious or funny, 12 words or fewer, not a plan summary); ' +
+    'memorable_line 8 or more only if you could imagine someone quoting it; personality 8 or more only if there is ' +
+    'real wit or a human observation, not just friendly tone. For any score under 7, add a scene_issue with a ' +
+    'concrete rewrite for the scene that most needs it. Judge catchiness: lines that only narrate an action or a ' +
+    'thought, scenes that all share one sentence shape, and a last line that summarises instead of paying off ' +
+    'the hook are defects. Also flag a cryptic reference (a prop or detail only the picture shows, insider shorthand, ' +
+    'a phrase repeated across scenes). Every "fix" you write must be plain, conversational and understandable on the ' +
+    'first listen: never abstract, never a brand definition, never a clever line that needs decoding.\n\n' +
     'Respond with strictly valid JSON: { "scores": { "arc": 0-10, "adds_meaning": 0-10, "inner_voice": 0-10, ' +
-    '"hook": 0-10, "memorable_line": 0-10, "ending": 0-10, "voice": 0-10 }, ' +
+    '"hook": 0-10, "memorable_line": 0-10, "ending": 0-10, "voice": 0-10, "flow": 0-10, "personality": 0-10, ' +
+    '"brand_fit": 0-10 }, ' +
     '"motif_returns": { "returns": boolean, "carry_in_scene": number or null }, ' +
     '"quotable": { "present": boolean, "scene": number or null }, ' +
     '"ending_image_in_final_visual": boolean, "last_line_lands_on_ending": boolean, ' +

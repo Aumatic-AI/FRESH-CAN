@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ScriptGenerator } from '../../adapters/types'
 import {
   getMeasuredWordsPerSecond,
+  getRecentVideoPlanDrafts,
   getVideoPlanDraftData,
   getVideoScenes,
   recordStepAttempt,
@@ -16,6 +17,12 @@ import { writeNarration } from './localizeScript'
 import { narrationSpineFromStory } from './generateScript'
 import type { NarrationReviewRecord } from '../../lib/narrationReview'
 import { buildScriptSummary } from './updateScript'
+
+/** The first sentence of a stored script (recent videos' opening lines). */
+export function firstSentence(script: unknown): string {
+  if (typeof script !== 'string') return ''
+  return script.trim().split(/(?<=[.!?…])\s+/)[0]?.trim() ?? ''
+}
 
 /**
  * Draft-time narration (runs right after generate_script, before the user
@@ -53,12 +60,25 @@ export async function runDraftNarration(
     } catch {
       spine = undefined
     }
+    // Best-effort: the opening lines of recent videos, so this one opens differently.
+    let recentOpeners: string[] = []
+    try {
+      const { data: pipe } = await client.from('content_pipelines').select('job_id').eq('id', contentPipelineId).maybeSingle()
+      const jobId = (pipe as { job_id?: string } | null)?.job_id
+      if (jobId) {
+        const recent = await getRecentVideoPlanDrafts(client, jobId)
+        recentOpeners = recent.map((d) => firstSentence(d.script)).filter(Boolean)
+      }
+    } catch {
+      recentOpeners = []
+    }
     let reviewRecord: NarrationReviewRecord | undefined
     const localized = await writeNarration(scriptGenerator, scenes, {
       language: 'English',
       wordsPerSecond,
       sceneNotes: options?.sceneNotes,
       spine,
+      recentOpeners,
       review: spine !== undefined,
       onReview: (r) => {
         reviewRecord = r

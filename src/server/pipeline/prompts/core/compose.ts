@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { pickDeterministic } from './rotation'
 import { cameraMovesEnabled } from '../../lib/cameraMoves'
-import { pickContainerCamera } from './containerCamera'
+import { pickContainerCamera, type ContainerFaceKey } from './containerCamera'
 import { SAFE_ZONE_RADIUS_FRACTION } from '../../lib/watermarkGeometry'
 import { PROMPT_LIMITS } from './limits'
 import { assertNoContradiction } from './contradictions'
@@ -1099,6 +1099,11 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     job.setting === 'interior' && (job.unitPresence ?? 'none') !== 'none'
       ? pickReferenceFrom(brand.referenceImages.interior, `${job.pipelineId}:${job.sceneNumber}:interior`)
       : undefined
+  // The real brand photo for this exterior scene, rotated per scene (stable on retry).
+  const exteriorSource =
+    showSubject && !interiorRef
+      ? pickReferenceFrom(brand.referenceImages.exterior, `${job.pipelineId}:${job.sceneNumber}:exterior`)
+      : undefined
   const compact = !!job.compactFixedText
   // The single container reference is a design anchor, not a fixed angle: the
   // scene may frame the container from any side, and the structure rules say
@@ -1114,7 +1119,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   const qualityFloor = compact ? PHOTOREALISTIC_QUALITY_FLOOR_COMPACT : PHOTOREALISTIC_QUALITY_FLOOR
   const guideNotCopy = interiorRef
     ? REFERENCE_IS_GUIDE_INTERIOR
-    : brand.referenceImages.exterior[0] && brand.referenceImages.exterior[0].url !== job.characterRefUrl
+    : exteriorSource && exteriorSource.url !== job.characterRefUrl
       ? compact
         ? REFERENCE_IS_GUIDE_EXTERIOR_COMPACT
         : REFERENCE_IS_GUIDE_EXTERIOR
@@ -1122,12 +1127,16 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
       ? REFERENCE_IS_GUIDE_COMPACT
       : REFERENCE_IS_GUIDE_NOT_COPY
   const castRefs = (job.castReferences ?? []).slice(0, MAX_CAST_REFERENCES)
-  // Interior scenes attach every interior photo (two viewpoints of one store)
-  // so the model can infer the room rather than copy a single frame.
-  const interiorExtras = interiorRef ? brand.referenceImages.interior.filter((r) => r.url !== interiorRef.url) : []
-  // Exterior scenes add the real brand photo as a second viewpoint next to this
+  // Interior scenes attach exactly two interior photos (two viewpoints of one
+  // store) so the model can infer the room rather than copy a single frame. With a
+  // larger pool the second one is picked per scene too, so scenes differ.
+  const otherInteriors = interiorRef ? brand.referenceImages.interior.filter((r) => r.url !== interiorRef.url) : []
+  const interiorSecond = pickReferenceFrom(otherInteriors, `${job.pipelineId}:${job.sceneNumber}:interior2`)
+  const interiorExtras = interiorSecond ? [interiorSecond] : []
+  // Exterior scenes add a real brand photo as a second viewpoint next to this
   // video's own generated view (image 1), so the model can derive a new angle.
-  const exteriorSource = brand.referenceImages.exterior[0]
+  // The photo rotates per scene (stable on retry); its own camera face is never
+  // picked for the scene, so no scene reproduces a photo's composition.
   const exteriorExtras =
     showSubject && !interiorRef && exteriorSource && exteriorSource.url !== job.characterRefUrl ? [exteriorSource.url] : []
   const castRefClause = castReferenceClause(castRefs, showSubject ? 1 + interiorExtras.length + exteriorExtras.length : 0)
@@ -1145,7 +1154,10 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // per scene), so the container is not drawn from the reference's own angle.
   const exteriorCamera =
     showSubject && !interiorRef
-      ? pickContainerCamera(job.pipelineId, job.sceneNumber, { withDistance: unitPresence === 'featured' })
+      ? pickContainerCamera(job.pipelineId, job.sceneNumber, {
+          withDistance: unitPresence === 'featured',
+          avoid: exteriorSource?.cameraFace as ContainerFaceKey | undefined,
+        })
       : ''
   const freshField = (v: string | undefined) => (v?.trim() ? truncateToFit(v.trim(), PLAN_FIELD_MAX_CHARS) : '')
   const freshClause = [
