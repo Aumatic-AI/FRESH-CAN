@@ -60,6 +60,24 @@ export const BRAND_PROFILE: BrandProfile = {
     'meant for nobody else',
     'for nobody else',
   ],
+  narrationBannedOpeners: [
+    'in a world where', 'imagine', 'meet ', 'introducing', 'picture this',
+    // French
+    'dans un monde où', 'imaginez', 'imagine ', 'découvrez', 'faites connaissance', 'voici ',
+  ],
+  narrationBannedClosers: [
+    'fresh food, for everyone',
+    'freshness delivered',
+    'because everyone deserves',
+    'fresh food for everyone',
+    // French
+    'des aliments frais pour tous', 'la fraîcheur livrée', 'parce que tout le monde mérite', 'parce que chacun mérite',
+  ],
+  narrationForbiddenTerms: [
+    'truck', 'trucks', 'wheels', 'trailer', 'cashier', 'cashiers', 'driver',
+    // French
+    'camion', 'camions', 'roues', 'remorque', 'caissier', 'caissière', 'caissiers', 'chauffeur',
+  ],
   // Each hard fact about how the service works is stated once per video, in
   // the scene it fits best — never recited scene after scene.
   narrationHardFacts: [

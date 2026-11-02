@@ -61,6 +61,28 @@ export interface VideoScriptStory {
   arc?: string
   resolution?: string
   cta?: string | null
+  /** Story spine (knowledge base §2.12, §4, §5, §6A). Internal: it steers
+   *  narration and review and is never shown on the approval screen. Every
+   *  field is optional, and a job created before the spine existed simply
+   *  has none of them. */
+  /** The one-line human truth the video is built on. */
+  insight?: string
+  /** One of STORY_FRAMEWORKS (generateScript.ts). */
+  framework?: string
+  /** One of HOOK_TYPES (generateScript.ts). */
+  hook_type?: string
+  /** What the lead character wants and quietly worries about, one line. */
+  inner?: string
+  /** The recurring object or gesture that carries meaning across scenes. */
+  motif?: string
+  /** The moment something changes. */
+  turn?: string
+  /** The concrete final picture; the final scene's visual must show it. */
+  ending_image?: string
+  /** The idea of the one line worth quoting (not its wording), and the
+   *  scene it lands in. */
+  quotable?: string
+  quotable_scene?: number
 }
 
 /** AI-authored per PROMPT_REFACTOR_BRIEF.md §4.3 — replaces the fixed
@@ -68,6 +90,21 @@ export interface VideoScriptStory {
  *  plan exists (Phase 1 §6.3). Phase 4 wires this into the scene-image/
  *  scene-video composers; until then it's generated and stored, not yet
  *  read downstream. */
+/** What the narration is written from. Built from the plan's `story` by
+ *  narrationSpineFromStory; undefined for a plan without a spine. */
+export interface NarrationSpine {
+  insight?: string
+  hook?: string
+  hook_type?: string
+  framework?: string
+  inner?: string
+  motif?: string
+  turn?: string
+  ending_image?: string
+  quotable?: string
+  quotable_scene?: number
+}
+
 export interface VideoScriptLook {
   time_of_day?: string
   lighting?: string
@@ -244,6 +281,13 @@ export interface BrandProfile {
    *  slogan-like closers). Plain lowercase phrases; sent to the narration
    *  prompt and enforced by lib/narrationStyle.ts. */
   narrationTells?: readonly string[]
+  /** Ways a video's narration must never OPEN (knowledge base §6A.4), and
+   *  ways its last scene must never CLOSE. Lowercase phrases. */
+  narrationBannedOpeners?: readonly string[]
+  narrationBannedClosers?: readonly string[]
+  /** Words narration must never contain: the unit is never a vehicle and has
+   *  no cashier (business-model negatives). Lowercase whole words. */
+  narrationForbiddenTerms?: readonly string[]
   /** Brand facts the narration may state only ONCE across a whole video (the
    *  journey/mechanics). `pattern` is a case-insensitive regex source covering
    *  the wording in every supported language. */

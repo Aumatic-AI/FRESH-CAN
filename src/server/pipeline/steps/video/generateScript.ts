@@ -21,6 +21,7 @@ import {
   type SceneVisualState,
   type CreativeBrief,
   type VideoScriptStory,
+  type NarrationSpine,
   type VideoScriptLook,
   type CastBibleEntry,
   type VideoLocation,
@@ -93,6 +94,10 @@ export interface ScriptSceneOutput {
   unit_framing?: string
   /** Surroundings, season, weather and time of day around this scene. */
   scene_environment?: string
+  /** Story spine: this scene's job in the arc, and what its narration adds
+   *  that the picture cannot show. Internal; see VideoScriptStory. */
+  story_role?: StoryRole
+  adds?: string
   is_final_scene?: boolean
 }
 
@@ -157,6 +162,23 @@ function coerceBoolean(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
 }
 
+export const STORY_ROLES = ['hook', 'context', 'turn', 'payoff', 'close'] as const
+export type StoryRole = (typeof STORY_ROLES)[number]
+const STORY_ROLE_VALUES = new Set<string>(STORY_ROLES)
+
+/** Knowledge base §5 and §4.2. A value outside these lists is dropped, so
+ *  stored tags stay comparable across videos. */
+export const STORY_FRAMEWORKS = [
+  'small_quest', 'pressure_cooker', 'time_machine', 'demo_drop', 'educator',
+  'origin_story', 'myth_killer', 'countdown', 'cliffhanger', 'pas', 'bab', 'pixar_spine',
+] as const
+export const HOOK_TYPES = [
+  'story_open', 'small_problem', 'pov', 'result_first', 'question', 'teach',
+  'callout', 'pattern_interrupt', 'number_list', 'confession',
+] as const
+const FRAMEWORK_VALUES = new Set<string>(STORY_FRAMEWORKS)
+const HOOK_TYPE_VALUES = new Set<string>(HOOK_TYPES)
+
 const UNIT_PRESENCE_VALUES = new Set(['none', 'background', 'featured'])
 const SETTING_VALUES = new Set(['exterior', 'interior', 'unrelated'])
 
@@ -168,7 +190,7 @@ function normalizeEnum<T extends string>(value: unknown, allowed: Set<string>): 
  *  never-fails-the-whole-script treatment as normalizeVisualState. Every
  *  field is itself optional, so a partially-specified object is still kept
  *  rather than discarded wholesale. */
-function normalizeStory(value: unknown): VideoScriptStory | undefined {
+export function normalizeStory(value: unknown): VideoScriptStory | undefined {
   if (!value || typeof value !== 'object') return undefined
   const v = value as Record<string, unknown>
   const out: VideoScriptStory = {}
@@ -176,6 +198,25 @@ function normalizeStory(value: unknown): VideoScriptStory | undefined {
   if (typeof v.arc === 'string') out.arc = v.arc
   if (typeof v.resolution === 'string') out.resolution = v.resolution
   if (typeof v.cta === 'string' || v.cta === null) out.cta = v.cta
+  const text = (x: unknown) => (typeof x === 'string' && x.trim() ? x.trim() : undefined)
+  const insight = text(v.insight)
+  if (insight) out.insight = insight
+  const framework = text(v.framework)?.toLowerCase()
+  if (framework && FRAMEWORK_VALUES.has(framework)) out.framework = framework
+  const hookType = text(v.hook_type)?.toLowerCase()
+  if (hookType && HOOK_TYPE_VALUES.has(hookType)) out.hook_type = hookType
+  const inner = text(v.inner)
+  if (inner) out.inner = inner
+  const motif = text(v.motif)
+  if (motif) out.motif = motif
+  const turn = text(v.turn)
+  if (turn) out.turn = turn
+  const endingImage = text(v.ending_image)
+  if (endingImage) out.ending_image = endingImage
+  const quotable = text(v.quotable)
+  if (quotable) out.quotable = quotable
+  const quotableScene = coerceNumber(v.quotable_scene)
+  if (quotableScene !== null && Number.isInteger(quotableScene) && quotableScene >= 1) out.quotable_scene = quotableScene
   return Object.keys(out).length > 0 ? out : undefined
 }
 
@@ -336,6 +377,11 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
       contains_food: coerceBoolean(scene.contains_food),
       unit_framing: typeof scene.unit_framing === 'string' ? scene.unit_framing : undefined,
       scene_environment: typeof scene.scene_environment === 'string' ? scene.scene_environment : undefined,
+      story_role: normalizeEnum<StoryRole>(
+        typeof scene.story_role === 'string' ? scene.story_role.trim().toLowerCase() : undefined,
+        STORY_ROLE_VALUES,
+      ),
+      adds: typeof scene.adds === 'string' && scene.adds.trim() ? scene.adds.trim() : undefined,
       is_final_scene: coerceBoolean(scene.is_final_scene),
     }))
   }
@@ -570,6 +616,8 @@ export interface SceneLayer2Fields {
   scene_environment?: string
   cast_present?: string[]
   beat?: string
+  story_role?: StoryRole
+  adds?: string
 }
 
 /** One short line per recent video plan: its look and first places. Pure, so
@@ -604,7 +652,33 @@ export function extractSceneLayer2Fields(narrationIntent: unknown): SceneLayer2F
     scene_environment: typeof v.scene_environment === 'string' ? v.scene_environment : undefined,
     cast_present: toStringArray(v.cast_present),
     beat: typeof v.beat === 'string' ? v.beat : undefined,
+    story_role: normalizeEnum<StoryRole>(v.story_role, STORY_ROLE_VALUES),
+    adds: typeof v.adds === 'string' && v.adds.trim() ? v.adds : undefined,
   }
+}
+
+/** The narration's story spine from a plan's stored `story`, or undefined when
+ *  it has none of the spine fields (a job created before the spine existed:
+ *  hook/arc/resolution alone do not count, so those jobs narrate as before). */
+export function narrationSpineFromStory(story: unknown): NarrationSpine | undefined {
+  const s = normalizeStory(story)
+  if (!s) return undefined
+  const spine: NarrationSpine = {
+    insight: s.insight, hook: s.hook, hook_type: s.hook_type, framework: s.framework, inner: s.inner,
+    motif: s.motif, turn: s.turn, ending_image: s.ending_image, quotable: s.quotable, quotable_scene: s.quotable_scene,
+  }
+  const hasSpineField = [s.insight, s.inner, s.motif, s.turn, s.ending_image, s.quotable].some(Boolean)
+  return hasSpineField ? spine : undefined
+}
+
+/** One short line per recent video plan: the story shape it used (hook type,
+ *  framework, motif), so a new plan can pick a different one. Pure; a plan
+ *  without a spine (any job created before it existed) yields ''. */
+export function summarizeRecentStory(draftData: Record<string, unknown>): string {
+  const story = normalizeStory(draftData.story)
+  if (!story) return ''
+  const motif = story.motif ? `motif "${story.motif.slice(0, 40)}"` : ''
+  return [story.hook_type, story.framework, motif].filter(Boolean).join(', ')
 }
 
 /**
@@ -664,11 +738,14 @@ export async function runGenerateScript(
       // like, so this one picks a different time, light and place. Any failure
       // just means no hint.
       let recentSettings: string[] = []
+      let recentStories: string[] = []
       try {
         const recent = await getRecentVideoPlanDrafts(client, pipeline.job_id)
         recentSettings = recent.map(summarizeRecentSettings).filter(Boolean)
+        recentStories = recent.map(summarizeRecentStory).filter(Boolean)
       } catch {
         recentSettings = []
+        recentStories = []
       }
       const result = await scriptGenerator.generate({
         systemPrompt: composeVideoScriptSystemPrompt(BRAND_PROFILE, {
@@ -678,6 +755,7 @@ export async function runGenerateScript(
           sceneNotes: input.sceneNotes,
           creativeBrief: input.creativeBrief,
           recentSettings,
+          recentStories,
         }),
         userPrompt:
           `Topic: ${input.topic}\nCategory: ${input.category}\n` +
@@ -756,6 +834,8 @@ export async function runGenerateScript(
             contains_food: s.contains_food,
             unit_framing: s.unit_framing,
             scene_environment: s.scene_environment,
+            story_role: s.story_role,
+            adds: s.adds,
             is_final_scene: s.is_final_scene,
           },
           targetDurationMs: Math.round(s.target_duration_seconds * 1000),

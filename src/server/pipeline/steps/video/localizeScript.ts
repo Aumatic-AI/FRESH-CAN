@@ -7,14 +7,23 @@ import {
   recordTrackRetryableFailure,
   markTrackFailed,
   getVideoScenes,
+  getVideoPlanDraftData,
   getMeasuredWordsPerSecond,
   upsertVideoSceneAudio,
   type TrackRow,
   type VideoSceneRow,
 } from '../../db'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
-import { BRAND_PROFILE, composeLocalizeScriptSystemPrompt } from '../../prompts/index'
+import { BRAND_PROFILE, composeLocalizeScriptSystemPrompt, composeNarrationReviewSystemPrompt, type NarrationSpine } from '../../prompts/index'
+import { extractSceneLayer2Fields, narrationSpineFromStory } from './generateScript'
 import { findNarrationStyleIssues } from '../../lib/narrationStyle'
+import {
+  brandMentionCount,
+  parseNarrationReview,
+  planReviewRewrites,
+  reviewRewriteViolations,
+  type NarrationReviewRecord,
+} from '../../lib/narrationReview'
 import {
   NARRATION_WORDS_PER_SECOND,
   narrationWordCount,
@@ -179,19 +188,29 @@ function isValidLocalizeOutput(parsed: unknown, expectedCount: number): parsed i
 export async function writeNarration(
   scriptGenerator: ScriptGenerator,
   scenes: readonly VideoSceneRow[],
-  opts: { language: 'English' | 'French'; wordsPerSecond: number; sceneNotes?: string | null },
+  opts: { language: 'English' | 'French'; wordsPerSecond: number
+    sceneNotes?: string | null
+    spine?: NarrationSpine
+    /** Run the one-call review and at most one rewrite (English drafts with a spine). */
+    review?: boolean
+    onReview?: (record: NarrationReviewRecord) => void
+  },
 ): Promise<LocalizedScene[]> {
   const { wordsPerSecond } = opts
   const systemPrompt = composeLocalizeScriptSystemPrompt(BRAND_PROFILE, {
     language: opts.language,
     wordsPerSecond,
     sceneNotes: opts.sceneNotes,
+    spine: opts.spine,
   })
   const sceneRequest = (s: (typeof scenes)[number], extra: Record<string, unknown> = {}) => {
     const range = narrationWordRange(s.target_duration_ms, wordsPerSecond)
     const approved = readSceneNarration(s.narration_intent).trim()
+    const { story_role, adds } = extractSceneLayer2Fields(s.narration_intent)
     return {
       scene_number: s.scene_number,
+      ...(story_role ? { story_role } : {}),
+      ...(adds ? { adds } : {}),
       narration_intent: (s.narration_intent as { text?: string } | null)?.text ?? s.narration_intent,
       ...(approved && opts.language !== 'English' ? { approved_english_narration: approved } : {}),
       on_screen: s.visual_description,
@@ -220,7 +239,7 @@ export async function writeNarration(
   const rewriteScenes = async (
     sceneNumbers: number[],
     extra: (sceneNumber: number) => Record<string, unknown>,
-    accept: (current: string, candidate: string, targetDurationMs: number) => boolean,
+    accept: (current: string, candidate: string, targetDurationMs: number, sceneNumber: number) => boolean,
   ): Promise<void> => {
     try {
       const retry = await scriptGenerator.generate({
@@ -235,7 +254,7 @@ export async function writeNarration(
       localized = localized.map((l) => {
         const f = fixed.find((x) => x.scene_number === l.scene_number)
         const target = scenes.find((x) => x.scene_number === l.scene_number)?.target_duration_ms ?? 0
-        return f && accept(l.narration_text, f.narration_text, target) ? f : l
+        return f && accept(l.narration_text, f.narration_text, target, l.scene_number) ? f : l
       })
     } catch {
       // keep the current narration
@@ -298,17 +317,31 @@ export async function writeNarration(
   // only if it has fewer problems AND fits the word band no worse than before
   // (the same guard as the passes above), so audio/video timing is never traded
   // for style. Runs last, so its accept test also re-checks the earlier rules.
-  const styleOpts = { tells: BRAND_PROFILE.narrationTells, hardFacts: BRAND_PROFILE.narrationHardFacts }
+  const firstScene = [...scenes].sort((a, b) => a.scene_number - b.scene_number)[0]
+  const firstBand = firstScene ? narrationWordRange(firstScene.target_duration_ms, wordsPerSecond) : null
+  const styleOpts = {
+    tells: BRAND_PROFILE.narrationTells,
+    hardFacts: BRAND_PROFILE.narrationHardFacts,
+    openers: BRAND_PROFILE.narrationBannedOpeners,
+    closers: BRAND_PROFILE.narrationBannedClosers,
+    // The hook cap and the picture-echo check only apply to a plan with a
+    // spine (older jobs narrate as before), and the echo check is English-only
+    // because on_screen is English.
+    ...(opts.spine && firstBand && firstBand.min <= 12 ? { hookMaxWords: 12 } : {}),
+    ...(opts.spine && opts.language === 'English'
+      ? { onScreen: new Map(scenes.map((s) => [s.scene_number, s.visual_description] as const)) }
+      : {}),
+  }
   // Skipped when a non-English track is translating wording the creator already
   // approved: that text is theirs, and restyling it would drift from what they signed off.
   const translatingApproved = opts.language !== 'English' && scenes.some((s) => readSceneNarration(s.narration_intent).trim() !== '')
   const styleIssues = translatingApproved ? new Map<number, string[]>() : findNarrationStyleIssues(localized, styleOpts)
+  const issueCount = (n: number, text: string) =>
+    findNarrationStyleIssues(
+      localized.map((l) => (l.scene_number === n ? { scene_number: n, narration_text: text } : l)),
+      styleOpts,
+    ).get(n)?.length ?? 0
   if (styleIssues.size > 0) {
-    const issueCount = (n: number, text: string) =>
-      findNarrationStyleIssues(
-        localized.map((l) => (l.scene_number === n ? { scene_number: n, narration_text: text } : l)),
-        styleOpts,
-      ).get(n)?.length ?? 0
     await rewriteScenes(
       [...styleIssues.keys()],
       (n) => ({
@@ -328,6 +361,87 @@ export async function writeNarration(
         )
       },
     )
+  }
+
+  // 5. ONE review of the finished narration (any track whose plan has a story
+  // spine; for French it also judges the adaptation against the approved English), then at most ONE rewrite of the scenes it flagged. Best-effort: any
+  // failure leaves the narration as it is. A rewritten scene is re-checked in code
+  // against every rule that has a code check (word band, entering/exiting words,
+  // brand-name form and count, style and hard-fact lints, vehicle/cashier words,
+  // invented figures); a rewrite that fails any of them is dropped. No second model
+  // call re-checks the picture: on_screen is in the rewrite request, and that is
+  // the whole safeguard for visual consistency.
+  if (opts.review && opts.spine) {
+    try {
+      const ordered = [...scenes].sort((a, b) => a.scene_number - b.scene_number)
+      const lastScene = ordered[ordered.length - 1].scene_number
+      const reviewResult = await scriptGenerator.generate({
+        systemPrompt: composeNarrationReviewSystemPrompt(BRAND_PROFILE, { language: opts.language }),
+        userPrompt: JSON.stringify({
+          language: opts.language,
+          brand_name: BRAND_PROFILE.name,
+          spine: opts.spine,
+          scenes: ordered.map((s) => {
+            const range = narrationWordRange(s.target_duration_ms, wordsPerSecond)
+            const { story_role, adds } = extractSceneLayer2Fields(s.narration_intent)
+            return {
+              scene_number: s.scene_number,
+              ...(story_role ? { story_role } : {}),
+              ...(adds ? { adds } : {}),
+              on_screen: s.visual_description,
+              narration_text: localized.find((l) => l.scene_number === s.scene_number)?.narration_text ?? '',
+              ...(opts.language !== 'English' && readSceneNarration(s.narration_intent).trim()
+                ? { english_narration: readSceneNarration(s.narration_intent).trim() }
+                : {}),
+              min_words: range.min,
+              max_words: range.max,
+            }
+          }),
+        }),
+        stepName: 'review_narration',
+      })
+      const review = parseNarrationReview(reviewResult.parsed, ordered.map((s) => s.scene_number))
+      if (review) {
+        const { notes, endingVisualMismatch } = planReviewRewrites(review, lastScene, opts.spine.quotable_scene)
+        const before = new Map(localized.map((l) => [l.scene_number, l.narration_text]))
+        if (notes.size > 0) {
+          const names = (swap: { scene_number: number; text: string }) =>
+            localized.map((l) => (l.scene_number === swap.scene_number ? swap.text : l.narration_text))
+          await rewriteScenes(
+            [...notes.keys()],
+            (n) => ({
+              previous_narration_must_change: before.get(n),
+              rewrite_note:
+                `A reviewer found: ${(notes.get(n) ?? []).join('; ')}. Change only what that needs. Keep the meaning, ` +
+                'the third person, the word band and what on_screen shows; add no number, price, place or new fact.',
+            }),
+            (current, candidate, target, n) => {
+              const mentionsBefore = brandMentionCount(names({ scene_number: n, text: current }), BRAND_PROFILE.name)
+              const mentionsAfter = brandMentionCount(names({ scene_number: n, text: candidate }), BRAND_PROFILE.name)
+              const brandOk = mentionsAfter === mentionsBefore || (mentionsBefore > 1 && mentionsAfter >= 1 && mentionsAfter < mentionsBefore)
+              return (
+                !narrationDescribesCrossing(candidate) &&
+                !narrationUsesBrandPossessive(candidate, BRAND_PROFILE.name) &&
+                brandOk &&
+                reviewRewriteViolations(candidate, current, { forbiddenTerms: BRAND_PROFILE.narrationForbiddenTerms }).length === 0 &&
+                issueCount(n, candidate) <= issueCount(n, current) &&
+                bandDistance(narrationWordCount(candidate), target, wordsPerSecond) <=
+                  bandDistance(narrationWordCount(current), target, wordsPerSecond)
+              )
+            },
+          )
+        }
+        const rewritten = localized.filter((l) => notes.has(l.scene_number) && l.narration_text !== before.get(l.scene_number)).map((l) => l.scene_number)
+        opts.onReview?.({
+          ...review,
+          rewritten,
+          kept_original: [...notes.keys()].filter((n) => !rewritten.includes(n)),
+          ending_visual_mismatch: endingVisualMismatch,
+        })
+      }
+    } catch {
+      // keep the narration as written
+    }
   }
   return localized
 }
@@ -416,12 +530,27 @@ export async function runLocalizeScript(
     // written/translated by the model below.
     const approvedEnglish = scenes.map((s) => readSceneNarration(s.narration_intent).trim())
     const useApprovedVerbatim = track.language === 'EN' && approvedEnglish.every((t) => t !== '')
+    // The plan's story spine, when it has one (best-effort: an unreadable plan narrates as before).
+    let spine: NarrationSpine | undefined
+    let reviewRecord: NarrationReviewRecord | undefined
+    if (!useApprovedVerbatim) {
+      try {
+        spine = narrationSpineFromStory((await getVideoPlanDraftData(client, contentPipelineId))?.story)
+      } catch {
+        spine = undefined
+      }
+    }
     const localized: LocalizedScene[] = useApprovedVerbatim
       ? scenes.map((s, i) => ({ scene_number: s.scene_number, narration_text: approvedEnglish[i] }))
       : await writeNarration(scriptGenerator, scenes, {
           language: languageName,
           wordsPerSecond,
           sceneNotes: options?.sceneNotes,
+          spine,
+          review: spine !== undefined,
+          onReview: (r) => {
+            reviewRecord = r
+          },
         })
 
     for (const scene of scenes) {
@@ -445,7 +574,7 @@ export async function runLocalizeScript(
       attemptNumber,
       status: 'succeeded',
       provider: 'openai',
-      outputSnapshot: { scenes: localized },
+      outputSnapshot: { scenes: localized, ...(reviewRecord ? { narration_review: reviewRecord } : {}) },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

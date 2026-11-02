@@ -16,6 +16,7 @@ import type {
 } from '../types'
 import { pickDeterministic } from './rotation'
 import { cameraMovesEnabled } from '../../lib/cameraMoves'
+import { pickContainerCamera } from './containerCamera'
 import { SAFE_ZONE_RADIUS_FRACTION } from '../../lib/watermarkGeometry'
 import { PROMPT_LIMITS } from './limits'
 import { assertNoContradiction } from './contradictions'
@@ -377,6 +378,19 @@ const REFERENCE_IS_GUIDE_NOT_COPY =
   'height and distance, and new surroundings, light and weather as the scene describes. Do not reuse the ' +
   "reference's background, framing, composition, or people."
 
+// Exterior counterpart: image 1 is this video's own generated view of the
+// container, image 2 the real brand photo. Two different viewpoints of one object
+// let the model work out a third one instead of reproducing either.
+const REFERENCE_IS_GUIDE_EXTERIOR =
+  'Images 1 and 2 show the same container from two different viewpoints: use them only as a guide for the ' +
+  "container's design (shape, structure, colour, wordmark and door placement) — never as a literal photo to " +
+  "copy. This is a NEW photograph from the camera position given below: do not reuse either photo's angle, " +
+  'framing, background or people.'
+
+const REFERENCE_IS_GUIDE_EXTERIOR_COMPACT =
+  'Images 1 and 2 show the same container from two viewpoints: a design guide only. Build a new photograph from ' +
+  'the camera position below, reusing no angle, framing or background.'
+
 // Interior counterpart: the photos fix what the store contains, never how
 // this scene is framed. Two photos of the same space are attached so the model
 // can infer the room instead of copying one view.
@@ -733,8 +747,13 @@ export function composeCharacterRefPrompt(brand: BrandProfile, job: CharacterRef
   // Always 'featured' — this is the project-level reference asset every
   // scene edits from, never a background/incidental appearance by
   // definition.
+  // A NEW view of the container for this video, not a copy of the brand photo: the
+  // camera position is picked per pipeline, on plain neutral ground so no scenery
+  // can be copied. Scenes then get this view plus the real photo as two viewpoints.
   const parts = [
-    `A clean, well-lit reference photo of the ${brand.name} branded standalone shipping container (no truck, cab or wheels).`,
+    `A well-lit photo of the ${brand.name} branded standalone shipping container (no truck, cab or wheels), ` +
+      'standing on its own on plain, neutral paved ground under a soft plain sky, with no buildings, trees or ' +
+      `people, fully in frame. Camera: ${pickContainerCamera(`${job.pipelineId}:ref`, 0, { withDistance: false })}.`,
     unitBrandingBlock(brand, 'featured'),
     oneWordmarkOnly(brand.unit.wordmarkText),
     PHOTOREALISTIC_QUALITY_FLOOR,
@@ -760,9 +779,9 @@ export function composeCharacterRefPrompt(brand: BrandProfile, job: CharacterRef
   // a future asset swap changes what index 0 actually is.
   const reference = brand.referenceImages.exterior[0]
   if (reference) {
-    parts.push(reference.whatItShows)
-    const disregard = disregardClause(reference.disregard)
-    if (disregard) parts.push(disregard)
+    // Scoped as a description of the INPUT only: its own camera angle and scenery
+    // must not become this photo's (the whole point is a different view).
+    parts.push(describeReferencePhoto(reference))
     referenceImageUrl = reference.url
   }
   // Phase 5 fix: this used to fall straight to the blanket
@@ -1095,14 +1114,23 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   const qualityFloor = compact ? PHOTOREALISTIC_QUALITY_FLOOR_COMPACT : PHOTOREALISTIC_QUALITY_FLOOR
   const guideNotCopy = interiorRef
     ? REFERENCE_IS_GUIDE_INTERIOR
-    : compact
+    : brand.referenceImages.exterior[0] && brand.referenceImages.exterior[0].url !== job.characterRefUrl
+      ? compact
+        ? REFERENCE_IS_GUIDE_EXTERIOR_COMPACT
+        : REFERENCE_IS_GUIDE_EXTERIOR
+      : compact
       ? REFERENCE_IS_GUIDE_COMPACT
       : REFERENCE_IS_GUIDE_NOT_COPY
   const castRefs = (job.castReferences ?? []).slice(0, MAX_CAST_REFERENCES)
   // Interior scenes attach every interior photo (two viewpoints of one store)
   // so the model can infer the room rather than copy a single frame.
   const interiorExtras = interiorRef ? brand.referenceImages.interior.filter((r) => r.url !== interiorRef.url) : []
-  const castRefClause = castReferenceClause(castRefs, showSubject ? 1 + interiorExtras.length : 0)
+  // Exterior scenes add the real brand photo as a second viewpoint next to this
+  // video's own generated view (image 1), so the model can derive a new angle.
+  const exteriorSource = brand.referenceImages.exterior[0]
+  const exteriorExtras =
+    showSubject && !interiorRef && exteriorSource && exteriorSource.url !== job.characterRefUrl ? [exteriorSource.url] : []
+  const castRefClause = castReferenceClause(castRefs, showSubject ? 1 + interiorExtras.length + exteriorExtras.length : 0)
 
   // Everything below is a fixed brand/safety constraint sent in full,
   // always — see limits.ts's PROMPT_LIMITS.sceneImage for why these can
@@ -1113,9 +1141,19 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // frame. SCENE_IS_CREATIVE_BRIEF only matters when brand details are
   // actually in the prompt (it tells the model those are constraints, not
   // the point) — a 'none' scene carries no brand details for it to govern.
+  // Exterior unit scenes: the camera position comes from code (random but stable
+  // per scene), so the container is not drawn from the reference's own angle.
+  const exteriorCamera =
+    showSubject && !interiorRef
+      ? pickContainerCamera(job.pipelineId, job.sceneNumber, { withDistance: unitPresence === 'featured' })
+      : ''
   const freshField = (v: string | undefined) => (v?.trim() ? truncateToFit(v.trim(), PLAN_FIELD_MAX_CHARS) : '')
   const freshClause = [
-    showSubject && freshField(job.unitFraming) ? `Framing for this scene: ${freshField(job.unitFraming)}.` : '',
+    exteriorCamera
+      ? `Camera position for the container: ${exteriorCamera}. This overrides any container angle in the shot notes.`
+      : showSubject && freshField(job.unitFraming)
+        ? `Framing for this scene: ${freshField(job.unitFraming)}.`
+        : '',
     freshField(job.sceneEnvironment) ? `Surroundings: ${freshField(job.sceneEnvironment)}.` : '',
   ]
     .filter(Boolean)
@@ -1278,7 +1316,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
 
   const prompt = parts.filter(Boolean).join(' ')
   assertNoContradiction(prompt, brand)
-  const extras = [...interiorExtras.map((r) => r.url), ...castRefs.map((r) => r.url)]
+  const extras = [...interiorExtras.map((r) => r.url), ...exteriorExtras, ...castRefs.map((r) => r.url)]
   return extras.length > 0 ? { prompt, referenceImageUrl, extraReferenceImageUrls: extras } : { prompt, referenceImageUrl }
 }
 

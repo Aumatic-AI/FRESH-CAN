@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { summarizeRecentSettings, extractSceneLayer2Fields, fitSceneDurations, fixUnitCrossingScenes, judgeDoorwayCrossings, lockSceneCamera, normalizeScriptOutput } from './generateScript'
+import { summarizeRecentSettings, summarizeRecentStory, narrationSpineFromStory, extractSceneLayer2Fields, fitSceneDurations, fixUnitCrossingScenes, judgeDoorwayCrossings, lockSceneCamera, normalizeScriptOutput } from './generateScript'
 
 // These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
 vi.stubEnv('CAMERA_MOVES', 'off')
@@ -405,5 +405,71 @@ describe('unit_framing / scene_environment round-trip', () => {
       scene_environment: 'drizzle, dusk',
     })
     expect(extractSceneLayer2Fields({ unit_framing: 5 }).unit_framing).toBeUndefined()
+  })
+})
+
+describe('story spine (internal planning fields)', () => {
+  const SPINE = {
+    insight: 'Kids remember small rituals.',
+    framework: 'small_quest',
+    hook_type: 'story_open',
+    inner: 'She wants to finish the recipe and worries it will not taste the same.',
+    motif: 'the recipe card',
+    turn: 'the lemons run out',
+    ending_image: 'the recipe card propped beside the finished loaf',
+    quotable: 'some recipes are really about a person',
+    quotable_scene: 3,
+  }
+  const base = {
+    script: 's', visual_description: 'v', duration_seconds: 8,
+    scenes: [
+      { scene_number: 1, visual_description: 'a', narration_intent: 'n1', target_duration_seconds: 4, story_role: 'Hook', adds: ' a worry ' },
+      { scene_number: 2, visual_description: 'b', narration_intent: 'n2', target_duration_seconds: 4, story_role: 'nonsense', adds: 5 },
+    ],
+  }
+
+  it('keeps every spine field and normalises per-scene role and adds', () => {
+    const out = normalizeScriptOutput({ ...base, story: { hook: 'h', ...SPINE } })!
+    expect(out.story).toMatchObject(SPINE)
+    expect(out.scenes[0].story_role).toBe('hook')
+    expect(out.scenes[0].adds).toBe('a worry')
+    expect(out.scenes[1].story_role).toBeUndefined()
+    expect(out.scenes[1].adds).toBeUndefined()
+  })
+
+  it('drops an unknown framework or hook type and a bad quotable_scene, keeping the rest', () => {
+    const out = normalizeScriptOutput({ ...base, story: { hook: 'h', framework: 'made_up', hook_type: 'shock', quotable_scene: 0, motif: 'a lemon' } })!
+    expect(out.story).toEqual({ hook: 'h', motif: 'a lemon' })
+  })
+
+  it('a plan without a spine (old or resumed job) still parses', () => {
+    const out = normalizeScriptOutput({ ...base, story: { hook: 'h', arc: 'a', resolution: 'r', cta: null } })!
+    expect(out.story).toEqual({ hook: 'h', arc: 'a', resolution: 'r', cta: null })
+    expect(out.scenes[0].story_role).toBe('hook')
+  })
+
+  it('survives the duration fit and the camera/unit repair that run after parsing', () => {
+    const out = normalizeScriptOutput({ ...base, story: { hook: 'h', ...SPINE } })!
+    const fitted = fitSceneDurations(out.scenes, 8)
+    expect(fitted[0].story_role).toBe('hook')
+    expect(fitted[0].adds).toBe('a worry')
+  })
+
+  it('per-scene role and adds round-trip through narration_intent', () => {
+    expect(extractSceneLayer2Fields({ story_role: 'turn', adds: 'a memory' })).toMatchObject({ story_role: 'turn', adds: 'a memory' })
+    expect(extractSceneLayer2Fields({ story_role: 'nope' }).story_role).toBeUndefined()
+    expect(extractSceneLayer2Fields({}).adds).toBeUndefined()
+  })
+
+  it('summarizeRecentStory describes the shape of a recent story and is empty without a spine', () => {
+    expect(summarizeRecentStory({ story: { hook: 'h', ...SPINE } })).toBe('story_open, small_quest, motif "the recipe card"')
+    expect(summarizeRecentStory({ story: { hook: 'h', arc: 'a' } })).toBe('')
+    expect(summarizeRecentStory({})).toBe('')
+  })
+
+  it('narrationSpineFromStory returns a spine only when a spine field exists', () => {
+    expect(narrationSpineFromStory({ hook: 'h', arc: 'a', resolution: 'r', cta: null })).toBeUndefined()
+    expect(narrationSpineFromStory(undefined)).toBeUndefined()
+    expect(narrationSpineFromStory({ hook: 'h', motif: 'a lemon', ending_image: 'the loaf' })).toMatchObject({ hook: 'h', motif: 'a lemon', ending_image: 'the loaf' })
   })
 })

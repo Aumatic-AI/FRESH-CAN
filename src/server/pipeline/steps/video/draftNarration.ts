@@ -13,6 +13,8 @@ import {
   resolveWordsPerSecond,
 } from '../../../../lib/videoNarrationBudget'
 import { writeNarration } from './localizeScript'
+import { narrationSpineFromStory } from './generateScript'
+import type { NarrationReviewRecord } from '../../lib/narrationReview'
 import { buildScriptSummary } from './updateScript'
 
 /**
@@ -44,10 +46,23 @@ export async function runDraftNarration(
   try {
     const measuredRate = options?.voiceId ? await getMeasuredWordsPerSecond(client, options.voiceId, 'EN') : null
     const wordsPerSecond = resolveWordsPerSecond(measuredRate)
+    // Best-effort: a plan without a spine (or an unreadable one) narrates as before.
+    let spine: ReturnType<typeof narrationSpineFromStory>
+    try {
+      spine = narrationSpineFromStory((await getVideoPlanDraftData(client, contentPipelineId))?.story)
+    } catch {
+      spine = undefined
+    }
+    let reviewRecord: NarrationReviewRecord | undefined
     const localized = await writeNarration(scriptGenerator, scenes, {
       language: 'English',
       wordsPerSecond,
       sceneNotes: options?.sceneNotes,
+      spine,
+      review: spine !== undefined,
+      onReview: (r) => {
+        reviewRecord = r
+      },
     })
 
     const byScene = new Map(localized.map((l) => [l.scene_number, l.narration_text.trim()]))
@@ -79,7 +94,8 @@ export async function runDraftNarration(
     if (draftData) {
       await client
         .from('content_drafts')
-        .update({ draft_data: { ...draftData, script }, updated_at: new Date().toISOString() })
+        // narration_review is internal (never shown on the approval screen).
+        .update({ draft_data: { ...draftData, script, ...(reviewRecord ? { narration_review: reviewRecord } : {}) }, updated_at: new Date().toISOString() })
         .eq('content_pipeline_id', contentPipelineId)
         .eq('content_type', 'video')
     }

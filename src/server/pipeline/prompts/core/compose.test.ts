@@ -1653,9 +1653,10 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
   it('attaches the portrait after the vehicle reference and says which image is which', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured', castReferences: [portrait] })
     expect(out.referenceImageUrl).toBe(sceneJob.characterRefUrl)
-    expect(out.extraReferenceImageUrls).toEqual([portrait.url])
-    expect(out.prompt).toContain('Image 1 is the location reference')
-    expect(out.prompt).toContain('image 2 is the resident')
+    // image 1 = this video's own view of the container, image 2 = the real brand photo, portraits after
+    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url, portrait.url])
+    expect(out.prompt).toContain('Images 1-2 are the location reference')
+    expect(out.prompt).toContain('image 3 is the resident')
   })
 
   it('makes the portrait image 1 in a scene without the unit (no vehicle reference attached)', () => {
@@ -1669,12 +1670,12 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
   it('caps the attached portraits so a busy scene never buries the vehicle reference', () => {
     const many = [1, 2, 3, 4, 5].map((n) => ({ id: `p${n}`, label: `person ${n}`, url: `https://example.com/p${n}.png` }))
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured', castReferences: many })
-    expect(out.extraReferenceImageUrls).toHaveLength(3)
+    expect(out.extraReferenceImageUrls).toHaveLength(4) // the brand photo + 3 portraits
   })
 
   it('changes nothing when no portraits are given (the previous text-only behavior)', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured' })
-    expect(out.extraReferenceImageUrls).toBeUndefined()
+    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url]) // only the brand photo, no portraits
     expect(out.prompt).not.toContain('Person reference photos')
   })
 })
@@ -1690,11 +1691,13 @@ describe('Part A: reference is identity only, scene is creative', () => {
     unitPresence: 'featured' as const,
   }
 
-  it('exterior scene tells the model to choose a new angle, height, distance and surroundings', () => {
+  it('exterior scene gets two viewpoints (this video\'s own view + the brand photo) and a code-chosen camera position', () => {
     const out = composeSceneImagePrompt(BRAND_PROFILE, base)
-    expect(out.prompt).toContain('NEW photograph')
-    expect(out.prompt).toContain('new camera angle, height and distance')
     expect(out.referenceImageUrl).toBe(base.characterRefUrl)
+    expect(out.extraReferenceImageUrls).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url])
+    expect(out.prompt).toContain('same container from two different viewpoints')
+    expect(out.prompt).toContain('NEW photograph from the camera position given below')
+    expect(out.prompt).toMatch(/Camera position for the container: .+\. This overrides any container angle in the shot notes\./)
   })
 
   it('interior scene attaches every interior photo and says they are two viewpoints of one store', () => {
@@ -1717,9 +1720,12 @@ describe('Part A: reference is identity only, scene is creative', () => {
     expect(out.extraReferenceImageUrls!.at(-1)).toBe('https://example.com/a.png')
   })
 
-  it('planned framing and surroundings are spliced in; framing only for unit scenes', () => {
+  it('planned framing is used for interior scenes only (outside, code picks the camera); surroundings always', () => {
     const job = { ...base, unitFraming: 'low angle from the kerb, wide', sceneEnvironment: 'light snow, late afternoon' }
-    const featured = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+    const exterior = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+    expect(exterior).not.toContain('Framing for this scene')
+    expect(exterior).toContain('Surroundings: light snow, late afternoon.')
+    const featured = composeSceneImagePrompt(BRAND_PROFILE, { ...job, setting: 'interior' }).prompt
     expect(featured).toContain('Framing for this scene: low angle from the kerb, wide.')
     expect(featured).toContain('Surroundings: light snow, late afternoon.')
     const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitPresence: 'none' }).prompt

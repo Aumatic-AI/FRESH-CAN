@@ -788,6 +788,21 @@ describe('composeLocalizeScriptSystemPrompt', () => {
   it('forbids narrating anyone entering or exiting the unit', () => {
     expect(composeLocalizeScriptSystemPrompt(testBrand, { language: 'English' })).toContain(NO_ENTRY_EXIT_NARRATION_RULE)
   })
+
+  it('adds the story spine block only when a spine is given, and always the brand opener/closer bans', () => {
+    const none = composeLocalizeScriptSystemPrompt(testBrand, { language: 'English' })
+    expect(none).not.toContain('STORY SPINE')
+    const spine = { motif: 'a recipe card', ending_image: 'the card beside the loaf', quotable: 'some recipes are about a person', quotable_scene: 3, inner: 'she worries it will not taste the same' }
+    const withSpine = composeLocalizeScriptSystemPrompt(testBrand, { language: 'English', spine })
+    expect(withSpine).toContain('STORY SPINE')
+    for (const piece of ['motif: a recipe card', 'ending image: the card beside the loaf', 'it lands in scene: 3', 'never as "I"', 'never in more than two scenes']) {
+      expect(withSpine).toContain(piece)
+    }
+    const banned = composeLocalizeScriptSystemPrompt({ ...testBrand, narrationBannedOpeners: ['imagine'], narrationBannedClosers: ['freshness delivered'] }, { language: 'English' })
+    expect(banned).toContain('Never open the video with: "imagine"')
+    expect(banned).toContain('Never close it with: "freshness delivered"')
+    expect(composeLocalizeScriptSystemPrompt({ ...testBrand, narrationBannedOpeners: undefined, narrationBannedClosers: undefined }, { language: 'English' })).not.toContain('Never open the video with')
+  })
 })
 
 describe('no entry/exit transition rule', () => {
@@ -821,7 +836,8 @@ describe('Track C script-planning rules', () => {
   it('requires cast_present people to be visible, the unit to be readable, and packaging to be unlettered', () => {
     expect(prompt()).toContain(SCENE_VISUAL_FIDELITY_RULE)
     expect(SCENE_VISUAL_FIDELITY_RULE).toContain('never reduce them to hands or a first-person view')
-    expect(SCENE_VISUAL_FIDELITY_RULE).toContain('large enough for its side wordmark to read cleanly')
+    expect(SCENE_VISUAL_FIDELITY_RULE).toContain('large and well lit enough for its wordmark to read cleanly')
+    expect(SCENE_VISUAL_FIDELITY_RULE).not.toContain('square-on')
     expect(SCENE_VISUAL_FIDELITY_RULE).toContain('no readable text')
   })
 })
@@ -846,7 +862,8 @@ describe('Part A: scene variation and freshness across videos', () => {
   it('asks the planner for a fresh unit_framing and scene_environment per scene', () => {
     const p = composeVideoScriptSystemPrompt(testBrand, opts)
     expect(p).toContain('"unit_framing"')
-    expect(p).toContain('never default to a straight-on, centred catalogue view')
+    expect(p).toContain('only for an INTERIOR unit scene')
+    expect(p).toContain('chosen separately')
     expect(p).toContain('"scene_environment"')
   })
 
@@ -857,5 +874,21 @@ describe('Part A: scene variation and freshness across videos', () => {
     expect(withRecent).toContain('the user\'s idea states them, which always wins')
     expect(composeVideoScriptSystemPrompt(testBrand, opts)).not.toContain('Recent videos already used')
     expect(composeVideoScriptSystemPrompt(testBrand, { ...opts, recentSettings: [] })).not.toContain('Recent videos already used')
+  })
+
+  it('asks for the story spine in the plan and per scene', () => {
+    const p = composeVideoScriptSystemPrompt(testBrand, opts)
+    expect(p).toContain('STORY CRAFT')
+    for (const f of ['"insight"', '"framework"', '"hook_type"', '"inner"', '"motif"', '"turn"', '"ending_image"', '"quotable"', '"story_role"', '"adds"']) {
+      expect(p).toContain(f)
+    }
+    expect(p).toContain('the final scene\'s visual_description actually show it')
+  })
+
+  it('adds a different-story-shape clause only when recent stories exist', () => {
+    const withRecent = composeVideoScriptSystemPrompt(testBrand, { ...opts, recentStories: ['story_open, small_quest'] })
+    expect(withRecent).toContain('Recent videos already told their story')
+    expect(withRecent).toContain('1) story_open, small_quest')
+    expect(composeVideoScriptSystemPrompt(testBrand, opts)).not.toContain('Recent videos already told')
   })
 })

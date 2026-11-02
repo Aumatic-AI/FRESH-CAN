@@ -2,7 +2,7 @@
 // prompts: fixed brand facts (mission, voice, real stats, category briefs)
 // live in the brand file and get spliced into every prompt, rather than
 // each step file writing brand-blind, topic-only prompts from scratch.
-import type { BrandProfile, CreativeBrief, ImageStyle } from '../types'
+import type { BrandProfile, CreativeBrief, ImageStyle, NarrationSpine } from '../types'
 import { NARRATION_WORDS_PER_SECOND } from '../../../../lib/videoNarrationBudget'
 import { cameraMovesEnabled } from '../../lib/cameraMoves'
 
@@ -117,8 +117,9 @@ export const ACTIVE_PEOPLE_PLANNER_RULE =
 export const SCENE_VISUAL_FIDELITY_RULE =
   'Every person in a scene\'s cast_present must be clearly visible on screen in that scene\'s ' +
   'visual_description — never swap them for unnamed extras, and never reduce them to hands or a first-person ' +
-  'view. When the unit appears, give it a clear, square-on, well-lit view large enough for its side wordmark ' +
-  'to read cleanly, or leave it out of that scene; never a tiny, distant, or partly hidden unit. Avoid ' +
+  'view. When the unit appears, keep it large and well lit enough for its wordmark to read cleanly whenever a ' +
+  'long side is visible, or leave it out of that scene; never a tiny, distant, or partly hidden unit. Do not ' +
+  'choose the container\'s camera angle: it is set separately for every scene. Avoid ' +
   'close-ups of product labels and bags — wherever packaging appears it carries no readable text.'
 
 /**
@@ -451,6 +452,8 @@ export interface VideoScriptSystemPromptOptions {
    *  clearly different look and place — never a hard rule: the idea's own
    *  stated setting always wins. Omitted/empty adds nothing. */
   recentSettings?: readonly string[]
+  /** Story shapes (hook type, framework, motif) of recent videos, newest first. */
+  recentStories?: readonly string[]
 }
 
 /** "Don't repeat what recent videos looked like" — one clause, soft by design. */
@@ -464,6 +467,44 @@ function recentSettingsClause(recent: readonly string[] | undefined): string {
     "unless the user's idea states them, which always wins. Every video should feel fresh."
   )
 }
+
+/** "Don't reuse the story shape of recent videos" — soft, like the settings clause. */
+function recentStoriesClause(recent: readonly string[] | undefined): string {
+  const list = (recent ?? []).filter((s) => s.trim()).slice(0, 5)
+  if (list.length === 0) return ''
+  return (
+    'Recent videos already told their story with these shapes (newest first): ' +
+    list.map((s, i) => `${i + 1}) ${s}`).join('; ') +
+    ' Choose a different hook type, framework and motif for this one, unless the idea above calls for the same.'
+  )
+}
+
+// Story craft (knowledge base §4.5, §5, §6A.5). The model works it out
+// silently and records the result in "story" and in each scene's
+// story_role/adds. Narration is written from that record, so it has a story
+// to tell instead of one line per picture.
+const STORY_CRAFT_CLAUSE =
+  'STORY CRAFT, also silent. Act as an award-winning commercial director and the social lead of a loved ' +
+  'brand: correct but forgettable is a failure. (a) Insight: state in one line the small human truth under the ' +
+  'idea (e.g. kids remember small rituals, not big days). (b) Sketch three concepts that all keep the idea, ' +
+  'each built on a different device (a straight heartfelt story, a reveal or point-of-view version, a light ' +
+  'humour version), score them 1-5 on surprise, emotional pull, shareability, faithfulness to the idea, brand ' +
+  'truth and producibility, and shoot the boldest one that scores at least 4 on faithfulness, brand truth and ' +
+  'producibility: bold never beats true. (c) Pick ONE framework from small_quest, pressure_cooker, ' +
+  'time_machine, demo_drop, educator, origin_story, myth_killer, countdown, cliffhanger, pas, bab, pixar_spine ' +
+  '(small_quest unless the idea fits another better). (d) Hook: draft four openers across at least three of ' +
+  'story_open, small_problem, pov, result_first, question, teach, callout, pattern_interrupt, number_list, ' +
+  'confession; keep the most specific one that can be paid off by the last scene, with the opening picture and the ' +
+  'opening line saying the same thing, an action already under way in the first frame, and never a logo or the ' +
+  'container alone. (e) Give the lead character one want and one small worry (inner), a turn where something ' +
+  'changes, and ONE recurring object or gesture (motif) that returns, in a new form, near the end. (f) Choose the ' +
+  'ending_image: a concrete, feeling-led final picture, not a summary or slogan, and make the final scene\'s ' +
+  'visual_description actually show it. (g) Decide the one line worth quoting: plain and specific, never a ' +
+  'slogan, and which scene it lands in. (h) Give every scene a story_role (hook, context, turn, payoff or ' +
+  'close) and an emotion that differs from its neighbours where the story allows, and write what its narration ' +
+  'will ADD that the picture cannot show (a thought, a memory, a worry, a reason), never a description of the ' +
+  'picture. (i) Polish: cut or merge the weakest scene, sharpen the first frame, make each scene\'s single action ' +
+  'more specific. Never open narration with "In a world where", "Imagine", "Meet" or "Introducing".'
 
 /**
  * Produces the script AND its scene-by-scene shot plan in ONE call
@@ -735,7 +776,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
       `container, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
       `second angle, and never a reason to insert brand or mission messaging into a scene the idea doesn't ` +
       `call for.${opts.creativeBrief ? ` ${creativeBriefContext(opts.creativeBrief)}` : ''} ` +
-      `${storyPlanningClause(brand)} ${recentSettingsClause(opts.recentSettings)} ${campaignFit(brand)} ${freshcanRoleAdaptivity(brand)} ${brandAssetFidelity(brand)} ` +
+      `${storyPlanningClause(brand)} ${STORY_CRAFT_CLAUSE} ${recentSettingsClause(opts.recentSettings)} ${recentStoriesClause(opts.recentStories)} ${campaignFit(brand)} ${freshcanRoleAdaptivity(brand)} ${brandAssetFidelity(brand)} ` +
       `Voice: ${brand.voiceGuidelines}${bannedWordsLine(brand)}\n\n`
     : brandContext(brand, opts.category) + statsLine(brand) + '\n\n'
 
@@ -752,8 +793,12 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '  "script": string (the full narration/voiceover text, human-readable, in English, for internal review only),\n' +
     '  "visual_description": string (one-paragraph overview of the video\'s overall visual concept),\n' +
     '  "duration_seconds": number (total estimated runtime, summing the scenes below),\n' +
-    '  "story": { "hook": string, "arc": string, "resolution": string, "cta": string or null } (a compact ' +
-    'summary of your planning above — the same hook/arc/payoff structure, not new content),\n' +
+    '  "story": { "hook": string, "arc": string, "resolution": string, "cta": string or null, "insight": string, ' +
+    '"framework": string (one of the framework keys above), "hook_type": string (one of the hook types above), ' +
+    '"inner": string, "motif": string, "turn": string, "ending_image": string, "quotable": string (the idea of ' +
+    'the line worth quoting, not final wording), "quotable_scene": number } (a compact summary of your planning ' +
+    'above — the same hook/arc/payoff structure and story craft, not new content; leave out any field you have no ' +
+    'real answer for),\n' +
     '  "look": { "time_of_day": string, "lighting": string, "palette": string, "style_direction": string, ' +
     '"camera_language": string } (the visual mood/style for the WHOLE video, deferential to whatever the scene ' +
     'idea itself already implies — this replaces guessing a default mood per image later),\n' +
@@ -775,6 +820,10 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '  "scenes": [\n' +
     '    {\n' +
     '      "scene_number": number (1-indexed, sequential, no gaps),\n' +
+    '      "story_role": "hook" | "context" | "turn" | "payoff" | "close" (this scene\'s job in the arc: the ' +
+    'first scene is the hook, the last is the close),\n' +
+    '      "adds": string (one short phrase: what this scene\'s narration adds that the picture cannot show, such ' +
+    'as a thought, a memory, a worry or a reason; never a description of the picture),\n' +
     '      "beat": string (this scene\'s narrative job — e.g. "hook", "build", "turn", "payoff", "close", or ' +
     'another word that fits better),\n' +
     '      "visual_description": string (what the camera shows — the subject\'s own action plus any natural ' +
@@ -821,10 +870,10 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'screen),\n' +
     '      "setting": "exterior" | "interior" | "unrelated" (unrelated for a setting that has nothing to do ' +
     'with the unit at all, e.g. a home kitchen),\n' +
-    '      "unit_framing": string (omit when unit_presence is "none" — how the container or store interior is ' +
-    'framed in THIS scene: camera angle and height, distance, and which part is visible. Choose a fresh ' +
-    'framing for each unit scene and vary it from scene to scene; never default to a straight-on, centred ' +
-    'catalogue view),\n' +
+    '      "unit_framing": string (only for an INTERIOR unit scene — how the store interior is framed in THIS ' +
+    'scene: camera angle and height, distance, and which part of the aisle is visible; vary it from scene to ' +
+    'scene. Omit it for exterior scenes and when unit_presence is "none": the container\'s camera angle outside ' +
+    'is chosen separately),\n' +
     '      "scene_environment": string (the surroundings, season, weather and time of day around this scene\'s ' +
     'subject — specific and different from the neighbouring scenes unless the story needs continuity, generic ' +
     'Canadian but never a named place),\n' +
@@ -901,8 +950,64 @@ export interface LocalizeScriptSystemPromptOptions {
   wordsPerSecond?: number
   /** The creator's own scene idea (content_jobs.scene_notes), if any. */
   sceneNotes?: string | null
+  /** The plan's story spine, when it has one. Without it the prompt is the
+   *  same as before the spine existed. */
+  spine?: NarrationSpine
 }
 
+/** Brand-owned clichés for how a video opens and closes (rule G4). */
+function narrationOpenersLine(brand: BrandProfile): string {
+  const open = brand.narrationBannedOpeners ?? []
+  const close = brand.narrationBannedClosers ?? []
+  return (
+    (open.length > 0 ? ` Never open the video with: ${open.map((o) => `"${o.trim()}"`).join(', ')}.` : '') +
+    (close.length > 0 ? ` Never close it with: ${close.map((o) => `"${o}"`).join(', ')}.` : '')
+  )
+}
+
+/** The story the narration is written to tell. Notes for the writer, never wording to copy. */
+function storySpineBlock(spine: NarrationSpine | undefined, language = 'English'): string {
+  if (!spine) return ''
+  const items: [string, string | number | undefined][] = [
+    ['insight', spine.insight],
+    ['hook idea', spine.hook],
+    ['hook type', spine.hook_type],
+    ['framework', spine.framework],
+    ["the lead's inner life", spine.inner],
+    ['motif', spine.motif],
+    ['turn', spine.turn],
+    ['ending image', spine.ending_image],
+    ['line worth quoting (the idea, not wording)', spine.quotable],
+    ['it lands in scene', spine.quotable_scene],
+  ]
+  const lines = items.filter(([, v]) => v !== undefined && String(v).trim() !== '').map(([k, v]) => `${k}: ${v}`)
+  if (lines.length === 0) return ''
+  return (
+    ' STORY SPINE. This is the plan for the whole video; write the narration to tell THIS story, as notes and ' +
+    `never wording to copy. ${lines.join('. ')}. Each scene also carries story_role (its job in the arc) and ` +
+    '"adds" (what its line must carry that the picture cannot show). Rules: the first scene\'s line is the ' +
+    'hook: at most 12 words when its word band allows, the key image first, opening a small question the last scene ' +
+    'answers. Every line adds something new (a thought, a memory, a worry, a reason); none only describes the picture ' +
+    'and no two scenes take the same angle. Tell the lead\'s inner life in the third person (what she wonders, ' +
+    'remembers or worries about), never as "I". The motif is named early and comes back near the end in a new form: ' +
+    'the same thing, not necessarily the same words. Place the one line worth quoting in its scene: plain, specific ' +
+    'and speakable, never a slogan. The last line lands on the ending image as a small concrete moment that matches ' +
+    'what the final scene shows. Where a scene\'s picture says it all, use the low end of its word band, but never in ' +
+    'more than two scenes, so the video keeps its length.' +
+    (language === 'French' ? FRENCH_SPINE_CLAUSE : '')
+  )
+}
+
+// French keeps the story, not the English sentences (knowledge base §6.3:
+// write natively, never translate idioms literally).
+const FRENCH_SPINE_CLAUSE =
+  ' FRENCH. Adapt the story, do not translate it word for word. The approved English is the story to keep (same ' +
+  'facts, same turn, same feeling); write it as a native speaker would say it aloud, in natural French for a ' +
+  'Canadian audience, with no anglicisms and no English idiom carried over. The narrator stays in the third person ' +
+  '(il, elle, ils; never je, nous or on as the storyteller). Keep the hook short and specific with its key image ' +
+  'first. Keep the motif as the same object or gesture, using the natural French word for it. Do not translate the ' +
+  'quotable line literally: write the line that would be quotable in French with the same meaning. Keep the ' +
+  'ending image exactly as an image. Fit each scene\'s French word band, which is counted in French words.'
 /**
  * The ONLY place video narration wording is produced per language
  * (ARCHITECTURE.MD §4.2 step 6a/§13's n8n mapping table) — takes each
@@ -1000,7 +1105,7 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     `How the service works (${(brand.narrationHardFacts ?? []).map((f) => f.label).join(', ') || 'its mechanics'}) is ` +
     'mentioned in at most one scene of the whole video, briefly and only if the story needs it. Say the brand name once, plainly, as part of the story, never as an ' +
     'announcement. End the last scene on a small, concrete human moment, never on a slogan, a lesson or the ' +
-    `idea's own tagline.${narrationTellsLine(brand)} Write it as natural spoken narration for a ` +
+    `idea's own tagline.${narrationTellsLine(brand)}${narrationOpenersLine(brand)}${storySpineBlock(opts.spine, opts.language)} Write it as natural spoken narration for a ` +
     'real story, never as scripted ad copy or a voiceover that sounds like a commercial. The one exception: if ' +
     `a narration_intent explicitly calls for naming ${brand.name} (or otherwise references the brand by name), the ` +
     `localized ${opts.language} wording MUST include that name literally, spoken naturally — never paraphrase, ` +
@@ -1011,6 +1116,57 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'with strictly valid JSON: ' +
     '{ "scenes": [ { "scene_number": number, "narration_text": string } ] }, exactly one entry per scene given, ' +
     'in the same order, using the given scene_number values unchanged.'
+  )
+}
+
+/**
+ * ONE text-only review of a finished English narration (knowledge base §10.1,
+ * narration dimensions only). It sees the story spine, every line and what
+ * each scene shows, and returns scores, auto-fail flags and a few concrete
+ * fixes. Never blocks anything: the creator still reads and approves.
+ */
+export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { language?: string } = {}): string {
+  const french = opts.language === 'French'
+  return (
+    (french
+      ? 'The narration under review is the FRENCH track of a video whose approved English narration is given as ' +
+        '"english_narration" for each scene. Everything below applies to the French lines, and you also judge the ' +
+        'adaptation: the hook is still short and specific; the motif, the quotable line and the ending image survive ' +
+        'in meaning (a literal translation of a line that only worked in English is a defect); no meaning, fact or ' +
+        'turn is lost or added; and it reads as natural spoken French, not translationese or an anglicism. Add ' +
+        '"native": 0-10 to scores, and use the kind "mistranslation" for a line that changes the English meaning. ' +
+        'The narrator never says je, nous or on as the storyteller.\n\n'
+      : '') +
+    'You are a creative QA lead for a warm, community-first Canadian grocery brand. You review the voiceover of ' +
+    'a short video against its story plan. You judge the narration only. You will be given the story spine (notes ' +
+    'the writer worked from), the brand name, the real facts that may be cited, and every scene with its story_role, ' +
+    'what the picture shows ("on_screen"), the narration line and its word band. Be strict and specific: report only ' +
+    'defects a listener would notice, and never ask for a change for taste alone.\n\n' +
+    'Judge these. (1) Arc: does the narration tell one small story with a turn and a warm landing? (2) Each line ' +
+    'adds something the picture cannot show (a thought, memory, worry, reason) rather than describing it. (3) The ' +
+    'lead\'s inner life comes through naturally, in the third person. (4) The hook: the first line is specific and ' +
+    'the last scene pays it off. (5) MOTIF: the spine\'s motif recurs in meaning, not necessarily in the same words ' +
+    '(the same object or gesture, or a clear equivalent, early and again near the end). If it does not return, say ' +
+    'which scene should carry it. (6) QUOTABLE: one plain, speakable line worth quoting exists, never a slogan. ' +
+    '(7) ENDING: first compare the spine\'s ending_image with the FINAL scene\'s on_screen text and say whether that ' +
+    'scene actually shows it; then say whether the final narration line lands on that image as a small concrete ' +
+    'moment. (8) Voice and dignity: warm, plain, no pity, no lecture, no slang.\n\n' +
+    'AUTO-FAIL kinds (flag whatever the score): invented_fact (any number, price, saving, count, date or place not ' +
+    `in the real facts, which are: ${brand.statistics.length > 0 ? brand.statistics.join(' | ') : 'none'}), ` +
+    `fake_testimonial, place_name (any city, province or neighbourhood; "Canada" is allowed), competitor, crossing ` +
+    '(someone entering, stepping into, walking out of or exiting the unit), cashier_or_checkout (a cashier, till, ' +
+    'queue to pay or per-item scanning), vehicle (a truck, arriving, driving or parking), talking_on_camera ' +
+    '(quoted dialogue), contradicts_picture (narration that conflicts with on_screen), hook_unpaid. ' +
+    'Also flag the brand name if it is said more than once, or possessively.\n\n' +
+    'Respond with strictly valid JSON: { "scores": { "arc": 0-10, "adds_meaning": 0-10, "inner_voice": 0-10, ' +
+    '"hook": 0-10, "memorable_line": 0-10, "ending": 0-10, "voice": 0-10 }, ' +
+    '"motif_returns": { "returns": boolean, "carry_in_scene": number or null }, ' +
+    '"quotable": { "present": boolean, "scene": number or null }, ' +
+    '"ending_image_in_final_visual": boolean, "last_line_lands_on_ending": boolean, ' +
+    '"auto_fail": [ { "scene_number": number or null, "kind": string, "detail": string } ], ' +
+    '"scene_issues": [ { "scene_number": number, "problem": string, "fix": string } ] }. ' +
+    'List at most four scene_issues, most important first, each with one concrete fix a rewrite can apply within ' +
+    'the scene\'s word band; leave the list empty when the narration is good.'
   )
 }
 
