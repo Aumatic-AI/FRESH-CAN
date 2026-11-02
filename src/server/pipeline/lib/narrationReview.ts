@@ -9,7 +9,7 @@ export interface NarrationReview {
   quotable: { present: boolean; scene: number | null } | null
   ending_image_in_final_visual: boolean | null
   last_line_lands_on_ending: boolean | null
-  auto_fail: { scene_number: number | null; kind: string; detail: string }[]
+  auto_fail: { scene_number: number | null; kind: string; detail: string; quote?: string }[]
   scene_issues: { scene_number: number; problem: string; fix: string }[]
 }
 
@@ -26,9 +26,28 @@ const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null)
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) ? v : null)
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
+const norm = (t: string) =>
+  t.toLowerCase().replace(/[’‘`]/g, "'").replace(/[“”«»]/g, '"').replace(/\s+/g, ' ').trim()
+
+/** True when `quote` is a verbatim stretch of the line (ignoring case, curly
+ *  quotes and spacing, and any surrounding quote marks or ellipsis). */
+export function quoteAppearsIn(quote: string, line: string): boolean {
+  const q = norm(quote).replace(/^["'.…\s]+|["'.…\s]+$/g, '')
+  return q.length >= 3 && norm(line).includes(q)
+}
+
 /** Lenient parse: null only when the answer is not an object at all. Scene
- *  numbers that do not exist in the video are dropped. */
-export function parseNarrationReview(parsed: unknown, sceneNumbers: readonly number[]): NarrationReview | null {
+ *  numbers that do not exist in the video are dropped. When `lines` (each
+ *  scene's narration) is given, an auto-fail flag must quote the offending
+ *  words exactly as they appear in that scene's line, or it is discarded: a
+ *  flag about words that are not in the narration (for example from the story
+ *  plan) can never trigger a rewrite. Only a whole-video hook_unpaid flag may
+ *  omit a scene and a quote. */
+export function parseNarrationReview(
+  parsed: unknown,
+  sceneNumbers: readonly number[],
+  lines?: ReadonlyMap<number, string>,
+): NarrationReview | null {
   if (!parsed || typeof parsed !== 'object') return null
   const p = parsed as Record<string, unknown>
   const known = new Set(sceneNumbers)
@@ -57,8 +76,13 @@ export function parseNarrationReview(parsed: unknown, sceneNumbers: readonly num
     last_line_lands_on_ending: bool(p.last_line_lands_on_ending),
     auto_fail: (Array.isArray(p.auto_fail) ? p.auto_fail : [])
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-      .map((x) => ({ scene_number: sceneOrNull(x.scene_number), kind: text(x.kind), detail: text(x.detail) }))
-      .filter((x) => x.kind !== ''),
+      .map((x) => ({ scene_number: sceneOrNull(x.scene_number), kind: text(x.kind), detail: text(x.detail), quote: text(x.quote) || undefined }))
+      .filter((x) => x.kind !== '')
+      .filter((x) => {
+        if (!lines) return true
+        if (x.scene_number === null) return x.kind === 'hook_unpaid'
+        return !!x.quote && quoteAppearsIn(x.quote, lines.get(x.scene_number) ?? '')
+      }),
     scene_issues: (Array.isArray(p.scene_issues) ? p.scene_issues : [])
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
       .map((x) => ({ scene_number: sceneOrNull(x.scene_number), problem: text(x.problem), fix: text(x.fix) }))

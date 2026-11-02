@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseNarrationReview, planReviewRewrites, reviewRewriteViolations, brandMentionCount, MAX_REVIEW_REWRITES } from './narrationReview'
+import { parseNarrationReview, quoteAppearsIn, planReviewRewrites, reviewRewriteViolations, brandMentionCount, MAX_REVIEW_REWRITES } from './narrationReview'
 import { composeNarrationReviewSystemPrompt } from '../prompts/index'
 import { BRAND_PROFILE } from '../prompts/brand/fresh-can'
 
@@ -86,5 +86,41 @@ describe('composeNarrationReviewSystemPrompt', () => {
   it('lists the auto-fail kinds and the real facts', () => {
     for (const k of ['invented_fact', 'fake_testimonial', 'place_name', 'crossing', 'cashier_or_checkout', 'vehicle', 'contradicts_picture', 'hook_unpaid']) expect(p).toContain(k)
     expect(p).toContain(BRAND_PROFILE.statistics[0])
+  })
+})
+
+describe('auto-fail flags must quote the narration', () => {
+  const lines = new Map([[1, 'After her night shift, a tired nurse grips her tote.'], [2, 'Fresh-CAN by her bus stop is open.']])
+  const flags = [
+    { scene_number: 1, kind: 'invented_fact', detail: 'an hour', quote: 'At seven' },
+    { scene_number: 2, kind: 'invented_fact', detail: 'sourcing', quote: 'Locally grown' },
+    { scene_number: 2, kind: 'place_name', detail: 'no quote given' },
+    { scene_number: 1, kind: 'vehicle', detail: 'real', quote: '“A TIRED nurse”' },
+    { scene_number: null, kind: 'hook_unpaid', detail: 'whole video' },
+    { scene_number: null, kind: 'invented_fact', detail: 'no scene, no quote' },
+  ]
+
+  it('quoteAppearsIn ignores case, curly marks, spacing and surrounding quotes, and rejects words that are not there', () => {
+    expect(quoteAppearsIn('“A TIRED  nurse”', lines.get(1)!)).toBe(true)
+    expect(quoteAppearsIn('At seven', lines.get(1)!)).toBe(false)
+    expect(quoteAppearsIn('', lines.get(1)!)).toBe(false)
+    expect(quoteAppearsIn('it', lines.get(1)!)).toBe(false) // too short to mean anything
+  })
+
+  it('keeps only flags whose quote is in that scene\'s line (and a whole-video hook_unpaid)', () => {
+    const r = parseNarrationReview({ auto_fail: flags }, [1, 2], lines)!
+    expect(r.auto_fail.map((f) => f.kind)).toEqual(['vehicle', 'hook_unpaid'])
+  })
+
+  it('does not verify quotes when no lines are given (older callers)', () => {
+    expect(parseNarrationReview({ auto_fail: flags }, [1, 2])!.auto_fail).toHaveLength(6)
+  })
+
+  it('the prompt asks for the quote and tells the reviewer the creator\'s idea is not invented', () => {
+    const p = composeNarrationReviewSystemPrompt(BRAND_PROFILE)
+    expect(p).toContain('"quote": string')
+    expect(p).toContain('creator_idea')
+    expect(p).toContain('is NOT invented')
+    expect(p).toContain('judge only the words in each scene')
   })
 })

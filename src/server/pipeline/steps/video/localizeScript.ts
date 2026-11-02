@@ -380,6 +380,7 @@ export async function writeNarration(
         userPrompt: JSON.stringify({
           language: opts.language,
           brand_name: BRAND_PROFILE.name,
+          creator_idea: opts.sceneNotes ?? '',
           spine: opts.spine,
           scenes: ordered.map((s) => {
             const range = narrationWordRange(s.target_duration_ms, wordsPerSecond)
@@ -400,7 +401,11 @@ export async function writeNarration(
         }),
         stepName: 'review_narration',
       })
-      const review = parseNarrationReview(reviewResult.parsed, ordered.map((s) => s.scene_number))
+      const review = parseNarrationReview(
+        reviewResult.parsed,
+        ordered.map((s) => s.scene_number),
+        new Map(localized.map((l) => [l.scene_number, l.narration_text] as const)),
+      )
       if (review) {
         const { notes, endingVisualMismatch } = planReviewRewrites(review, lastScene, opts.spine.quotable_scene)
         const before = new Map(localized.map((l) => [l.scene_number, l.narration_text]))

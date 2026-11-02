@@ -283,6 +283,30 @@ describe('narration review (one call, at most one rewrite)', () => {
     }
   })
 
+  it('sends the creator\'s idea to the reviewer', async () => {
+    const calls: { step?: string; user: string }[] = []
+    const g: ScriptGenerator = {
+      async generate(input) {
+        calls.push({ step: input.stepName, user: input.userPrompt })
+        if (input.stepName === 'review_narration') return { parsed: {}, raw: '' } as never
+        return { parsed: { scenes: [{ scene_number: 1, narration_text: L1 }, { scene_number: 2, narration_text: L2_OLD }] }, raw: '' } as never
+      },
+    }
+    await writeNarration(g, scenes, { language: 'English', wordsPerSecond: 2.65, spine, review: true, sceneNotes: 'a nurse gets home at 7 am' })
+    expect(JSON.parse(calls.find((c) => c.step === 'review_narration')!.user).creator_idea).toBe('a nurse gets home at 7 am')
+  })
+
+  it('a flag that quotes words not in the line (e.g. from the story plan) never triggers a rewrite; a real quote does', async () => {
+    const phantom = { auto_fail: [{ scene_number: 2, kind: 'invented_fact', detail: 'x', quote: 'locally grown berries' }] }
+    const a = await run({ review: phantom })
+    expect(a.calls.filter((c) => c.step === 'localize_script')).toHaveLength(1)
+    expect(a.records[0].auto_fail).toEqual([])
+    const real = { auto_fail: [{ scene_number: 2, kind: 'invented_fact', detail: 'x', quote: 'one more small mark' }] }
+    const b = await run({ review: real })
+    expect(b.calls.filter((c) => c.step === 'localize_script')).toHaveLength(2)
+    expect(b.records[0].rewritten).toEqual([2])
+  })
+
   it('drops a rewrite that fits the word band worse', async () => {
     const { out } = await run({ review: flagScene2, rewrite: 'A crown.' })
     expect(out.find((o) => o.scene_number === 2)?.narration_text).toBe(L2_OLD)

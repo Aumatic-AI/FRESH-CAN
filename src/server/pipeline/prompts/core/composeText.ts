@@ -1151,8 +1151,12 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
     '(7) ENDING: first compare the spine\'s ending_image with the FINAL scene\'s on_screen text and say whether that ' +
     'scene actually shows it; then say whether the final narration line lands on that image as a small concrete ' +
     'moment. (8) Voice and dignity: warm, plain, no pity, no lecture, no slang.\n\n' +
+    'The creator\'s own idea for the video is given as "creator_idea". Anything it states (a time of day, a person\'s ' +
+    'job, an everyday detail) is NOT invented, so never flag it; a place name, price, saving, count or claim still ' +
+    'fails whatever the idea says. The spine is the writer\'s planning notes, not narration: judge only the words in ' +
+    'each scene\'s narration_text.\n\n' +
     'AUTO-FAIL kinds (flag whatever the score): invented_fact (any number, price, saving, count, date or place not ' +
-    `in the real facts, which are: ${brand.statistics.length > 0 ? brand.statistics.join(' | ') : 'none'}), ` +
+    `in the real facts or the creator's idea, which are: ${brand.statistics.length > 0 ? brand.statistics.join(' | ') : 'none'}), ` +
     `fake_testimonial, place_name (any city, province or neighbourhood; "Canada" is allowed), competitor, crossing ` +
     '(someone entering, stepping into, walking out of or exiting the unit), cashier_or_checkout (a cashier, till, ' +
     'queue to pay or per-item scanning), vehicle (a truck, arriving, driving or parking), talking_on_camera ' +
@@ -1163,7 +1167,9 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
     '"motif_returns": { "returns": boolean, "carry_in_scene": number or null }, ' +
     '"quotable": { "present": boolean, "scene": number or null }, ' +
     '"ending_image_in_final_visual": boolean, "last_line_lands_on_ending": boolean, ' +
-    '"auto_fail": [ { "scene_number": number or null, "kind": string, "detail": string } ], ' +
+    '"auto_fail": [ { "scene_number": number or null, "kind": string, "detail": string, "quote": string } ] ' +
+    '(quote is REQUIRED: the offending words copied exactly from that scene\'s narration_text; a flag whose quote is ' +
+    'not in that line is discarded; only hook_unpaid may have scene_number null and no quote), ' +
     '"scene_issues": [ { "scene_number": number, "problem": string, "fix": string } ] }. ' +
     'List at most four scene_issues, most important first, each with one concrete fix a rewrite can apply within ' +
     'the scene\'s word band; leave the list empty when the narration is good.'
