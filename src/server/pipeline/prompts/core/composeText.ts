@@ -4,6 +4,7 @@
 // each step file writing brand-blind, topic-only prompts from scratch.
 import type { BrandProfile, CreativeBrief, ImageStyle } from '../types'
 import { NARRATION_WORDS_PER_SECOND } from '../../../../lib/videoNarrationBudget'
+import { cameraMovesEnabled } from '../../lib/cameraMoves'
 
 /**
  * Renders a CreativeBrief (Layer 1, PROMPT_REFACTOR_BRIEF.md §4.2) as
@@ -34,6 +35,12 @@ function creativeBriefContext(brief: CreativeBrief): string {
 
 function bannedWordsLine(brand: BrandProfile): string {
   return brand.bannedWords.length > 0 ? ` Avoid these overused phrases: ${brand.bannedWords.join(', ')}.` : ''
+}
+
+/** The brand's stock phrases that make narration sound machine-written. */
+function narrationTellsLine(brand: BrandProfile): string {
+  const tells = brand.narrationTells ?? []
+  return tells.length > 0 ? ` Never use these stock phrases or close variants of them: ${tells.join('; ')}.` : ''
 }
 
 function statsLine(brand: BrandProfile): string {
@@ -426,6 +433,26 @@ export interface VideoScriptSystemPromptOptions {
    *  as before. Only folded in alongside sceneNotes — see
    *  composeVideoScriptSystemPrompt's own body for why. */
   creativeBrief?: CreativeBrief
+  /** Allow planned camera moves (default: CAMERA_MOVES env, on). False keeps the
+   *  old locked-off rule. */
+  cameraMoves?: boolean
+  /** Short summaries of the settings recent videos used (time of day, light,
+   *  palette, locations), newest first. Spliced in so a new video picks a
+   *  clearly different look and place — never a hard rule: the idea's own
+   *  stated setting always wins. Omitted/empty adds nothing. */
+  recentSettings?: readonly string[]
+}
+
+/** "Don't repeat what recent videos looked like" — one clause, soft by design. */
+function recentSettingsClause(recent: readonly string[] | undefined): string {
+  const list = (recent ?? []).filter((s) => s.trim()).slice(0, 5)
+  if (list.length === 0) return ''
+  return (
+    'Recent videos already used these looks and places (newest first): ' +
+    list.map((s, i) => `${i + 1}) ${s}`).join(' ') +
+    ' Give this video a clearly different time of day, light, colour palette, season and surroundings — ' +
+    "unless the user's idea states them, which always wins. Every video should feel fresh."
+  )
 }
 
 /**
@@ -657,7 +684,39 @@ function finalSelfCheckClause(brand: BrandProfile): string {
   )
 }
 
+const SHOT_NOTES_CAMERA_STATIC =
+  'THE CAMERA NEVER MOVES — every shot is locked-off and static, so write "static", never a pan, ' +
+  'tilt, track, follow, dolly, zoom, push-in, orbit or handheld move: the video model scrolls, repeats and ' +
+  'morphs the background whenever the camera travels. Be concrete — e.g. "static low-angle wide shot, shallow ' +
+  'depth of field, soft window light" or "static medium close-up on the subject, background held steady" — ' +
+  'never just "cinematic" or "dynamic shot".'
+
+const SHOT_NOTES_CAMERA_MOVING =
+  'Add ONE camera move when the moment calls for it, chosen by what it means: a slow push-in for a realisation ' +
+  'or decision, a slow pull-back to reveal scale or community, a gentle slider/parallax move past a foreground ' +
+  'object, a slow zoom with the camera fixed for a face, gentle handheld for a documentary feel, or a short ' +
+  'reverse-tracking shot for someone walking toward the camera — or "static" when the moment should simply be ' +
+  'held. Name the move and how it starts and ends; keep it slow and short, the subject in the foreground and the ' +
+  'background simple, because the video model repeats and morphs a scrolling background. Never an orbit around a ' +
+  'face, a whip pan, a crash zoom, a fly-through of a doorway, or a long follow shot. Mix moves and static shots ' +
+  'across the video, never the same move in every scene. Be concrete — never just "cinematic" or "dynamic shot".'
+
+const SHORT_FILM_CAMERA_STATIC =
+  'give each one deliberate framing in shot_notes — every shot is locked-off and static, never a pan or ' +
+  'track: the video model repeats and morphs a scrolling background, so the subject does the moving, not ' +
+  'the camera. Keep each action small enough for ONE locked frame (reaching, holding, looking, a few steps in ' +
+  'place) — never a long walk toward or away from the camera —'
+
+const SHORT_FILM_CAMERA_MOVING =
+  'give each one deliberate framing in shot_notes, and where the moment calls for it a slow, short, motivated ' +
+  'camera move (see shot_notes) — never a long travelling shot, since the video model repeats and morphs a ' +
+  'scrolling background. Keep each action small enough for one short clip (reaching, holding, looking, a few ' +
+  'steps) rather than a long walk toward or away from the camera —'
+
 export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoScriptSystemPromptOptions): string {
+  const moves = opts.cameraMoves ?? cameraMovesEnabled()
+  const shotNotesCamera = moves ? SHOT_NOTES_CAMERA_MOVING : SHOT_NOTES_CAMERA_STATIC
+  const shortFilmCamera = moves ? SHORT_FILM_CAMERA_MOVING : SHORT_FILM_CAMERA_STATIC
   const preamble = opts.sceneNotes
     ? `Build this video's story and every one of its scenes around the user's own creative idea: ` +
       `"${opts.sceneNotes}". This idea alone decides what the video is about and what happens in it — ` +
@@ -666,7 +725,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
       `container, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
       `second angle, and never a reason to insert brand or mission messaging into a scene the idea doesn't ` +
       `call for.${opts.creativeBrief ? ` ${creativeBriefContext(opts.creativeBrief)}` : ''} ` +
-      `${storyPlanningClause(brand)} ${campaignFit(brand)} ${freshcanRoleAdaptivity(brand)} ${brandAssetFidelity(brand)} ` +
+      `${storyPlanningClause(brand)} ${recentSettingsClause(opts.recentSettings)} ${campaignFit(brand)} ${freshcanRoleAdaptivity(brand)} ${brandAssetFidelity(brand)} ` +
       `Voice: ${brand.voiceGuidelines}${bannedWordsLine(brand)}\n\n`
     : brandContext(brand, opts.category) + statsLine(brand) + '\n\n'
 
@@ -714,15 +773,15 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'purpose from your planning above: what specifically happens, in what environment, and how it connects to ' +
     'the scene immediately before it — never a generic or purposeless shot),\n' +
     '      "shot_notes": string (cinematographic direction for this exact shot: angle, framing, distance and depth ' +
-    'of field. THE CAMERA NEVER MOVES — every shot is locked-off and static, so write "static", never a pan, ' +
-    'tilt, track, follow, dolly, zoom, push-in, orbit or handheld move: the video model scrolls, repeats and ' +
-    'morphs the background whenever the camera travels. Be concrete — e.g. "static low-angle wide shot, shallow ' +
-    'depth of field, soft window light" or "static medium close-up on the subject, background held steady" — ' +
-    'never just "cinematic" or "dynamic shot". Choose the angle and framing that serve THIS scene\'s specific ' +
+    'of field. ' + shotNotesCamera + ' Choose the angle and framing that serve THIS scene\'s specific ' +
     'purpose in the story, not decoration for its own sake),\n' +
     '      "narration_intent": string (the SEMANTIC content this scene\'s narration should convey — describe ' +
     'the idea in plain terms, NEVER write it as a finished sentence in any one language, since this gets ' +
-    'independently localized into actual EN or FR wording by a later step),\n' +
+    'independently localized into actual EN or FR wording by a later step. Write the moment, the feeling or the ' +
+    'character\'s inner thought, not a list of facts to state: do NOT restate how the service works (account, QR ' +
+    'scan, payment, checkout) in more than one scene of the whole video, and never write instructions to the ' +
+    'narrator such as "explicitly naming", "clarifying that" or "preserving" — just say what the scene is about, ' +
+    'e.g. "he finds a unit around the corner and relief starts to creep in"),\n' +
     '      "target_duration_seconds": number (this scene\'s planned runtime budget),\n' +
     '      "cast_present": string[] (the cast_bible ids of every recurring person who VISUALLY appears in ' +
     'this scene, if any — include them even when this scene is set at a different location or in a different ' +
@@ -752,6 +811,13 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'screen),\n' +
     '      "setting": "exterior" | "interior" | "unrelated" (unrelated for a setting that has nothing to do ' +
     'with the unit at all, e.g. a home kitchen),\n' +
+    '      "unit_framing": string (omit when unit_presence is "none" — how the container or store interior is ' +
+    'framed in THIS scene: camera angle and height, distance, and which part is visible. Choose a fresh ' +
+    'framing for each unit scene and vary it from scene to scene; never default to a straight-on, centred ' +
+    'catalogue view),\n' +
+    '      "scene_environment": string (the surroundings, season, weather and time of day around this scene\'s ' +
+    'subject — specific and different from the neighbouring scenes unless the story needs continuity, generic ' +
+    'Canadian but never a named place),\n' +
     '      "contains_food": boolean (does this scene show food, produce, or packaged groceries),\n' +
     '      "is_final_scene": boolean (true only for the actual last scene),\n' +
     '      "visual_state": { "people": number, "hands": string (who this scene\'s visible hands belong to, ' +
@@ -783,10 +849,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     SCENE_VISUAL_FIDELITY_RULE +
     ' Shoot it like a well-made short film, not a slideshow of ' +
     'plain snapshots: vary shot types scene to scene (wide, medium, close-up, low-angle, over-the-shoulder) and ' +
-    'give each one deliberate framing in shot_notes — every shot is locked-off and static, never a pan or ' +
-    'track: the video model repeats and morphs a scrolling background, so the subject does the moving, not ' +
-    'the camera. Keep each action small enough for ONE locked frame (reaching, holding, looking, a few steps in ' +
-    'place) — never a long walk toward or away from the camera — this is ' +
+    shortFilmCamera +
+    ' this is ' +
     'a production-quality bar every scene should meet, never a directive on what mood or overall style to ' +
     'use, which stays entirely up to the scene idea. If the idea above is brief, expand it creatively into ' +
     'specific, vivid visual detail — concrete actions, objects, and environment — but every detail must still ' +
@@ -908,7 +972,25 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
       ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it, and any ` +
         'action it rules out (for example "no scanning") never appears in the wording. '
       : '') +
-    'Write it as natural spoken narration for a ' +
+    'HUMAN VOICE. One unseen storyteller tells the whole video, the way a warm, observant person would tell it ' +
+    'aloud to a friend, in a plain, polished register. The storyteller is NOT a character and NOT the company: never say "I", "we", "our", "us" ' +
+    'or "my" — only "he", "she", "they", the people\'s role or relationship, and plain third-person narration. ' +
+    'Never quote dialogue (people do not speak on camera); say what they said or felt instead. Sound like speech, ' +
+    'not a report: contractions, sentences of different lengths, the occasional question, complete ' +
+    'sentences with a verb. REGISTER: warm and clear, like a well-written brand film voiceover — everyday words, ' +
+    'never slang, banter, jokes or chatty asides ("honestly", "to be fair"), and never ornate or riddle-like ' +
+    'either: allow at most ONE gentle figurative touch in the whole video, and cut any line a listener would ' +
+    'have to decode or that sounds like a literary flourish; say a feeling plainly (for example that they smile at ' +
+    'each other) instead of inventing a poetic way to put it. Do NOT write telegraphic fragments, bare lists of items, semicolons or colons, and no ' +
+    'more than one "X, not Y" turn in the whole video. Prefer one specific, concrete detail the viewer cannot see ' +
+    '(a thought, a habit, a small worry) over a general statement, and never an abstract noun like ' +
+    '"togetherness" or "happiness" where a concrete image would do. narration_intent is NOTES on what to convey, ' +
+    'never wording to copy: ignore any instruction-like phrasing in it ("explicitly naming", "clarifying", ' +
+    '"preserving") and never recite how the service works unless that scene is genuinely about it. ' +
+    `How the service works (${(brand.narrationHardFacts ?? []).map((f) => f.label).join(', ') || 'its mechanics'}) is ` +
+    'mentioned in at most one scene of the whole video, briefly and only if the story needs it. Say the brand name once, plainly, as part of the story, never as an ' +
+    'announcement. End the last scene on a small, concrete human moment, never on a slogan, a lesson or the ' +
+    `idea's own tagline.${narrationTellsLine(brand)} Write it as natural spoken narration for a ` +
     'real story, never as scripted ad copy or a voiceover that sounds like a commercial. The one exception: if ' +
     `a narration_intent explicitly calls for naming ${brand.name} (or otherwise references the brand by name), the ` +
     `localized ${opts.language} wording MUST include that name literally, spoken naturally — never paraphrase, ` +

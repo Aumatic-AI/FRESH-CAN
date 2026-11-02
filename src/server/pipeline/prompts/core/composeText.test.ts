@@ -1,5 +1,5 @@
 import { NARRATION_WORDS_PER_SECOND } from '../../../../lib/videoNarrationBudget'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   composeIntentSystemPrompt,
   composeImagePlanSystemPrompt,
@@ -15,6 +15,10 @@ import {
   SCENE_VISUAL_FIDELITY_RULE,
 } from './composeText'
 import type { BrandProfile, CreativeBrief } from '../types'
+
+// These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
+vi.stubEnv('CAMERA_MOVES', 'off')
+
 
 const TEST_CREATIVE_BRIEF: CreativeBrief = {
   intent: 'community story',
@@ -832,5 +836,26 @@ describe('unit_presence guidance for arrive/shop/leave scenes (job 65b08e09 scen
 
   it('reserves "none" for scenes where the unit plays no part', () => {
     expect(prompt()).toContain('Choose "none" for scenes where the unit plays no part in what is shown')
+  })
+})
+
+
+describe('Part A: scene variation and freshness across videos', () => {
+  const opts = { category: 'Test Category', scriptType: 'SOLUTION', targetDurationSeconds: 36, sceneNotes: 'A grandfather bakes' }
+
+  it('asks the planner for a fresh unit_framing and scene_environment per scene', () => {
+    const p = composeVideoScriptSystemPrompt(testBrand, opts)
+    expect(p).toContain('"unit_framing"')
+    expect(p).toContain('never default to a straight-on, centred catalogue view')
+    expect(p).toContain('"scene_environment"')
+  })
+
+  it('adds a soft do-not-repeat clause only when recent settings exist', () => {
+    const withRecent = composeVideoScriptSystemPrompt(testBrand, { ...opts, recentSettings: ['golden hour, warm palette', 'overcast, cool grey'] })
+    expect(withRecent).toContain('Recent videos already used these looks and places')
+    expect(withRecent).toContain('1) golden hour, warm palette')
+    expect(withRecent).toContain('the user\'s idea states them, which always wins')
+    expect(composeVideoScriptSystemPrompt(testBrand, opts)).not.toContain('Recent videos already used')
+    expect(composeVideoScriptSystemPrompt(testBrand, { ...opts, recentSettings: [] })).not.toContain('Recent videos already used')
   })
 })

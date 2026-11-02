@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
-import { fitSceneDurations, fixUnitCrossingScenes, judgeDoorwayCrossings, lockSceneCamera, normalizeScriptOutput } from './generateScript'
+import { describe, it, expect, vi } from 'vitest'
+import { summarizeRecentSettings, extractSceneLayer2Fields, fitSceneDurations, fixUnitCrossingScenes, judgeDoorwayCrossings, lockSceneCamera, normalizeScriptOutput } from './generateScript'
+
+// These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
+vi.stubEnv('CAMERA_MOVES', 'off')
+
 
 const VALID = {
   script: 'A short script.',
@@ -379,5 +383,27 @@ describe('doorway crossings judged by meaning (job 369ff9de scene 4: "steps back
     )
     expect(out[0].visual_description).toBe('They stand beside the unit.')
     expect(out[0].narration_intent).toBe('They leave the unit with bags and feel happy today')
+  })
+})
+
+
+describe('summarizeRecentSettings', () => {
+  it('summarises look and first two places, skipping missing fields', () => {
+    const line = summarizeRecentSettings({
+      look: { time_of_day: 'golden hour', lighting: 'soft low sun', palette: 'warm amber' },
+      locations: [{ id: 'a', description: 'a quiet street with maples' }, { id: 'b', description: 'a kitchen' }, { id: 'c', description: 'third' }],
+    })
+    expect(line).toBe('golden hour, soft low sun, palette warm amber, places: a quiet street with maples / a kitchen')
+    expect(summarizeRecentSettings({})).toBe('')
+  })
+})
+
+describe('unit_framing / scene_environment round-trip', () => {
+  it('extractSceneLayer2Fields reads them from narration_intent and ignores non-strings', () => {
+    expect(extractSceneLayer2Fields({ unit_framing: 'high angle, wide', scene_environment: 'drizzle, dusk' })).toMatchObject({
+      unit_framing: 'high angle, wide',
+      scene_environment: 'drizzle, dusk',
+    })
+    expect(extractSceneLayer2Fields({ unit_framing: 5 }).unit_framing).toBeUndefined()
   })
 })

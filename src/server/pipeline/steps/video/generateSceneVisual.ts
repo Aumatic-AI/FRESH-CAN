@@ -35,6 +35,7 @@ import { effectiveSlotMs, plannedSlotMs } from '../../lib/effectiveSceneDuration
 import { parseMp4DurationSeconds } from '../../lib/mp4Duration'
 import { extractClipFrames } from '../../lib/clipFrames'
 import { lintClipMotion } from '../../lib/clipMotion'
+import { cameraMovesEnabled, mentionsCameraMove } from '../../lib/cameraMoves'
 import {
   BRAND_PROFILE,
   composeSceneImagePrompt,
@@ -243,6 +244,10 @@ function findAsset(
 // snapshot existed fall back to the old regenInstructions correction. See this file's own header for
 // why this rides the EXISTING error_message column instead of a new one.
 const VALIDATION_RETRY_PREFIX = 'VALIDATION_RETRY:'
+// A clip rendered with a camera move that the finished-clip check found drifting
+// (morphing container, repeating background, new people) is re-rendered ONCE with
+// a locked-off camera. Static clips stay report-only, as before.
+const CLIP_DRIFT_RETRY_PREFIX = 'CLIP_DRIFT_RETRY:'
 
 // Validation-driven regenerations get their OWN budget, separate from
 // MAX_ATTEMPTS.kie (which exists for genuine provider failures). Before
@@ -266,6 +271,21 @@ export const COLLAGE_ISSUE = 'the image is a collage or stacked multi-panel layo
  *  drawn door, so the retry regenerates from scratch with a positive rule. */
 export function isUnitDoorIssue(issue: string): boolean {
   return /\b(?:door|hatch|service window|vent|opening)\b.*\b(?:side|front|truck|unit|container)\b|\b(?:side|front)\b.*\b(?:door|hatch|opening)\b|wordmark.*more than once/i.test(issue)
+}
+
+/** Real reference photos to compare a scene still against: the interior photos
+ *  for an interior unit scene, the exterior photo for an exterior one, none when
+ *  the unit is not in the scene. */
+export function referenceUrlsForValidation(l2: { unit_presence?: string; setting?: string }): string[] | undefined {
+  if ((l2.unit_presence ?? 'none') === 'none') return undefined
+  const pool = l2.setting === 'interior' ? BRAND_PROFILE.referenceImages.interior : BRAND_PROFILE.referenceImages.exterior.slice(0, 1)
+  const urls = pool.map((r) => r.url)
+  return urls.length > 0 ? urls : undefined
+}
+
+/** The validator's "does not match the real container/interior reference" finding. */
+export function isReferenceMismatchIssue(issue: string): boolean {
+  return /real container\/interior reference/i.test(issue)
 }
 
 /** The validator's "truck, cab or wheels visible" finding — the unit is a
@@ -320,6 +340,12 @@ export function buildCorrectionInstruction(issues: string[]): string {
   }
   if (issues.some(isThirdPartyBrandIssue)) {
     return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
+  }
+  if (issues.some(isReferenceMismatchIssue)) {
+    return (
+      'Match the real reference design exactly — colour, wordmark count and placement, door and QR panel ' +
+      'positions, and interior fixtures — and invent nothing that is not in the reference.'
+    )
   }
   if (issues.some(isUnitVehicleIssue)) {
     return (
@@ -472,6 +498,8 @@ async function runSceneImageStep(
             unitPresence: layer2.unit_presence,
             appPresence: layer2.app_on_screen,
             setting: layer2.setting,
+            unitFraming: layer2.unit_framing,
+            sceneEnvironment: layer2.scene_environment,
             containsFood: layer2.contains_food,
             // Only people this scene explicitly lists — an unknown/empty
             // cast_present never pulls a recurring person into the frame.
@@ -549,6 +577,9 @@ async function runSceneImageStep(
               const l2 = extractSceneLayer2Fields(scene.narration_intent)
               return l2.setting === 'interior' ? 'none' : l2.unit_presence
             })(),
+            // The real photos the scene was built from, so the check judges the
+            // DESIGN against the truth (not only against rules in words).
+            referenceImageUrls: referenceUrlsForValidation(extractSceneLayer2Fields(scene.narration_intent)),
           })
         } catch (err) {
           // Fail OPEN — see OpenAIImageValidator's own header (adapters/
@@ -561,7 +592,7 @@ async function runSceneImageStep(
 
       // Only queried on a rejection — the common (passing) path costs no
       // extra DB round-trip.
-      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i))
+      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isReferenceMismatchIssue(i))
       const validationRetriesUsed = validation.pass
         ? 0
         : await countFailedStepAttemptsWithPrefix(
@@ -762,6 +793,8 @@ async function runSceneVideoClipStep(
   // succeeded step's snapshot so a bad clip can be traced to its prompt.
   let motionLine: string | undefined
   let submittedThisRun = false
+  // True only when THIS run submitted a clip whose prompt allowed a camera move.
+  let cameraMoveUsed = false
   // Set only when a downscale job was already submitted (and billed, though
   // upload-post.com's downscale is unbilled today) and left unresolved by a
   // previous attempt — same "provider_ref set + status still 'generating'"
@@ -851,6 +884,16 @@ async function runSceneVideoClipStep(
         // is in an exterior scene its door may be visible: keep it shut/empty.
         const doorInFrame =
           layer2.setting !== 'interior' && (layer2.unit_presence ?? 'none') !== 'none'
+        // After one drifted moving-camera render of this scene, the next
+        // submission goes back to a locked-off camera (see CLIP_DRIFT_RETRY_PREFIX).
+        const driftRetriesUsed = await countFailedStepAttemptsWithPrefix(
+          client,
+          { contentPipelineId: pipeline.id },
+          stepName,
+          generation,
+          CLIP_DRIFT_RETRY_PREFIX,
+        )
+        const cameraMoves = cameraMovesEnabled() && driftRetriesUsed === 0
         // A short motion-only line written from the approved still (the video
         // model already sees the still, so the scene text is not repeated).
         // Any failure or a line that fails the lint falls back to the
@@ -863,14 +906,19 @@ async function runSceneVideoClipStep(
               shotNotes: scene.shot_notes,
               durationSeconds,
               doorInFrame,
+              cameraMoves,
             })
-            motionLine = lintClipMotion(written) ?? undefined
+            motionLine = lintClipMotion(written, { cameraMoves }) ?? undefined
             if (!motionLine) console.log(`[${stepName}] motion line rejected by lint, using the scene-text prompt: ${String(written).slice(0, 160)}`)
           } catch (motionErr) {
             console.warn(`[${stepName}] motion writer failed, using the scene-text prompt:`, motionErr)
           }
         }
+        // Remember whether this submission could have used a camera move, so a
+        // drifting clip is only re-rendered when a move could be the cause.
+        cameraMoveUsed = cameraMoves && mentionsCameraMove(motionLine ?? scene.shot_notes)
         const prompt = composeSceneVideoPrompt({
+          forceStaticCamera: !cameraMoves,
           motion: motionLine,
           doorInFrame,
           visualDescription: scene.visual_description,
@@ -1055,7 +1103,41 @@ async function runSceneVideoClipStep(
             unitPresence: l2.setting === 'interior' ? 'none' : l2.unit_presence,
           })
           clipCheckIssues = verdict.issues
-          if (!verdict.pass) console.log(`[${stepName}] clip check found: ${verdict.issues.join('; ')} (report only, clip kept)`)
+          if (!verdict.pass) {
+            const driftRetriesUsed = cameraMoveUsed
+              ? await countFailedStepAttemptsWithPrefix(
+                  client,
+                  { contentPipelineId: pipeline.id },
+                  stepName,
+                  generation,
+                  CLIP_DRIFT_RETRY_PREFIX,
+                )
+              : 1
+            if (cameraMoveUsed && driftRetriesUsed === 0 && !hasExceededMaxAttempts(attemptNumber, MAX_ATTEMPTS.kie)) {
+              // Downgrade ladder: moving camera -> locked-off. One extra clip at most
+              // per scene; the next attempt submits fresh (no provider_ref/raw url kept).
+              console.log(`[${stepName}] clip drift with a camera move (attempt ${attemptNumber}): ${verdict.issues.join('; ')} — re-rendering once with a locked-off camera`)
+              await upsertVisualAsset(client, {
+                contentPipelineId: pipeline.id,
+                generation,
+                assetType: 'scene_video_clip',
+                videoSceneId: scene.id,
+                status: 'failed',
+                attemptNumber,
+              })
+              await recordStepAttempt(client, {
+                contentPipelineId: pipeline.id,
+                stepName,
+                generation,
+                attemptNumber,
+                status: 'failed_retryable',
+                provider: 'openai',
+                errorMessage: `${CLIP_DRIFT_RETRY_PREFIX}${verdict.issues.join('; ')}`,
+              })
+              return true
+            }
+            console.log(`[${stepName}] clip check found: ${verdict.issues.join('; ')} (report only, clip kept)`)
+          }
         }
       } catch (checkErr) {
         console.warn(`[${stepName}] clip check skipped (fail open):`, checkErr)

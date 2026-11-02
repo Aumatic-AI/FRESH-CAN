@@ -9,8 +9,10 @@ import {
   upsertVideoScriptDraft,
   upsertVideoScenes,
   getVideoScenes,
+  getRecentVideoPlanDrafts,
   type PipelineRow,
 } from '../../db'
+import { cameraMovesEnabled } from '../../lib/cameraMoves'
 import { visualDescribesUnitCrossing, narrationDescribesCrossing } from './localizeScript'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import {
@@ -87,6 +89,10 @@ export interface ScriptSceneOutput {
   app_on_screen?: 'none' | 'background' | 'featured'
   setting?: 'exterior' | 'interior' | 'unrelated'
   contains_food?: boolean
+  /** Fresh framing (angle, height, distance) of the container/interior for this scene. */
+  unit_framing?: string
+  /** Surroundings, season, weather and time of day around this scene. */
+  scene_environment?: string
   is_final_scene?: boolean
 }
 
@@ -255,6 +261,7 @@ const FRAMING =
 /** Rewrites camera-movement shot notes to a static, locked-off shot (scenes with
  *  people only); a scene with no movement words is returned unchanged (same object). */
 export function lockSceneCamera(scene: ScriptSceneOutput): ScriptSceneOutput {
+  if (cameraMovesEnabled()) return scene
   const notes = scene.shot_notes
   if (!notes || !CAMERA_MOVE.test(notes)) return scene
   const hasPeople = (scene.cast_present?.length ?? 0) > 0 || (scene.visual_state?.people ?? 0) >= 1
@@ -327,6 +334,8 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
       app_on_screen: normalizeEnum(scene.app_on_screen, UNIT_PRESENCE_VALUES),
       setting: normalizeEnum(scene.setting, SETTING_VALUES),
       contains_food: coerceBoolean(scene.contains_food),
+      unit_framing: typeof scene.unit_framing === 'string' ? scene.unit_framing : undefined,
+      scene_environment: typeof scene.scene_environment === 'string' ? scene.scene_environment : undefined,
       is_final_scene: coerceBoolean(scene.is_final_scene),
     }))
   }
@@ -557,8 +566,29 @@ export interface SceneLayer2Fields {
   app_on_screen?: 'none' | 'background' | 'featured'
   setting?: 'exterior' | 'interior' | 'unrelated'
   contains_food?: boolean
+  unit_framing?: string
+  scene_environment?: string
   cast_present?: string[]
   beat?: string
+}
+
+/** One short line per recent video plan: its look and first places. Pure, so
+ *  it is unit-testable; anything missing is skipped, an empty plan yields ''. */
+export function summarizeRecentSettings(draftData: Record<string, unknown>): string {
+  const look = (draftData.look && typeof draftData.look === 'object' ? draftData.look : {}) as Record<string, unknown>
+  const pick = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : '')
+  const locations = Array.isArray(draftData.locations) ? (draftData.locations as Record<string, unknown>[]) : []
+  const places = locations
+    .slice(0, 2)
+    .map((l) => pick(l?.description, 60))
+    .filter(Boolean)
+  const bits = [
+    pick(look.time_of_day, 40),
+    pick(look.lighting, 50),
+    pick(look.palette, 50) ? `palette ${pick(look.palette, 50)}` : '',
+    places.length ? `places: ${places.join(' / ')}` : '',
+  ].filter(Boolean)
+  return bits.join(', ')
 }
 
 export function extractSceneLayer2Fields(narrationIntent: unknown): SceneLayer2Fields {
@@ -570,6 +600,8 @@ export function extractSceneLayer2Fields(narrationIntent: unknown): SceneLayer2F
     app_on_screen: normalizeEnum(v.app_on_screen, UNIT_PRESENCE_VALUES),
     setting: normalizeEnum(v.setting, SETTING_VALUES),
     contains_food: coerceBoolean(v.contains_food),
+    unit_framing: typeof v.unit_framing === 'string' ? v.unit_framing : undefined,
+    scene_environment: typeof v.scene_environment === 'string' ? v.scene_environment : undefined,
     cast_present: toStringArray(v.cast_present),
     beat: typeof v.beat === 'string' ? v.beat : undefined,
   }
@@ -628,6 +660,16 @@ export async function runGenerateScript(
   if (!alreadySucceeded) {
     const attemptNumber = working.retry_count + 1
     try {
+      // Freshness across videos: best-effort read of what recent videos looked
+      // like, so this one picks a different time, light and place. Any failure
+      // just means no hint.
+      let recentSettings: string[] = []
+      try {
+        const recent = await getRecentVideoPlanDrafts(client, pipeline.job_id)
+        recentSettings = recent.map(summarizeRecentSettings).filter(Boolean)
+      } catch {
+        recentSettings = []
+      }
       const result = await scriptGenerator.generate({
         systemPrompt: composeVideoScriptSystemPrompt(BRAND_PROFILE, {
           category: input.category,
@@ -635,6 +677,7 @@ export async function runGenerateScript(
           targetDurationSeconds: input.durationSeconds,
           sceneNotes: input.sceneNotes,
           creativeBrief: input.creativeBrief,
+          recentSettings,
         }),
         userPrompt:
           `Topic: ${input.topic}\nCategory: ${input.category}\n` +
@@ -711,6 +754,8 @@ export async function runGenerateScript(
             app_on_screen: s.app_on_screen,
             setting: s.setting,
             contains_food: s.contains_food,
+            unit_framing: s.unit_framing,
+            scene_environment: s.scene_environment,
             is_final_scene: s.is_final_scene,
           },
           targetDurationMs: Math.round(s.target_duration_seconds * 1000),

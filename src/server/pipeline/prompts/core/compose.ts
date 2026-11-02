@@ -15,6 +15,7 @@ import type {
   VideoScriptLook,
 } from '../types'
 import { pickDeterministic } from './rotation'
+import { cameraMovesEnabled } from '../../lib/cameraMoves'
 import { SAFE_ZONE_RADIUS_FRACTION } from '../../lib/watermarkGeometry'
 import { PROMPT_LIMITS } from './limits'
 import { assertNoContradiction } from './contradictions'
@@ -371,9 +372,20 @@ function watermarkSafeZoneBlock(): string {
 // 'never as a literal photo to copy') exactly, since compose.test.ts
 // asserts on them directly.
 const REFERENCE_IS_GUIDE_NOT_COPY =
-  "Use the reference photo only as a guide for the container's shape, structure, and color — never as a " +
-  "literal photo to copy. Do not reuse its background, framing, composition, or people; build a new scene " +
-  'instead.'
+  "Use the reference photo only as a guide for the container's design (shape, structure, colour, wordmark and " +
+  "door placement) — never as a literal photo to copy. This is a NEW photograph: choose a new camera angle, " +
+  'height and distance, and new surroundings, light and weather as the scene describes. Do not reuse the ' +
+  "reference's background, framing, composition, or people."
+
+// Interior counterpart: the photos fix what the store contains, never how
+// this scene is framed. Two photos of the same space are attached so the model
+// can infer the room instead of copying one view.
+const REFERENCE_IS_GUIDE_INTERIOR =
+  'The reference photos show the same store from two viewpoints: use them only as a guide for what the interior ' +
+  'contains (shelving, refrigerated cases, flooring, lighting, fixtures) — never as a literal photo to copy. This ' +
+  'is a NEW photograph: show a different part of the aisle from a new angle, height and distance, with new ' +
+  "people and action. Do not reuse either photo's framing or composition."
+
 
 /**
  * Describes what a reference photo actually shows, scoped explicitly as
@@ -808,11 +820,16 @@ export function composeCastRefPrompt(brand: BrandProfile, person: CastBibleEntry
  * says not to reuse the reference's people — that applies to the vehicle
  * photo, never to these portraits, whose whole point is the person.
  */
-function castReferenceClause(refs: readonly CastReference[], hasPrimaryReference: boolean): string {
+function castReferenceClause(refs: readonly CastReference[], locationImageCount: number): string {
   if (refs.length === 0) return ''
-  const first = hasPrimaryReference ? 2 : 1
+  const first = locationImageCount + 1
   const list = refs.map((r, i) => `image ${first + i} is ${r.label}`).join('; ')
-  const primary = hasPrimaryReference ? 'Image 1 is the location reference described below. ' : ''
+  const primary =
+    locationImageCount === 0
+      ? ''
+      : locationImageCount === 1
+        ? 'Image 1 is the location reference described below. '
+        : `Images 1-${locationImageCount} are the location reference described below. `
   return (
     `${primary}Person reference photos: ${list}. Draw each of these people with exactly that face, skin tone, ` +
     'hair, build and outfit — the same individual, not a look-alike. Use those photos only for who the person ' +
@@ -840,6 +857,12 @@ function aspectFramingClause(aspectRatio: SceneAspectRatio | undefined): string 
 }
 
 interface SceneImageJob {
+  /** THIS scene's planned framing of the container/interior (angle, height,
+   *  distance) and surroundings (season, weather, time of day) — Layer 2
+   *  `unit_framing`/`scene_environment`. Spliced in as the scene's fresh
+   *  variation so the reference photo only anchors the design, not the shot. */
+  unitFraming?: string
+  sceneEnvironment?: string
   /** The job's chosen aspect ratio (content_jobs.aspect_ratio); '9:16' when omitted,
    *  matching the pipeline's own default. */
   aspectRatio?: SceneAspectRatio
@@ -939,8 +962,8 @@ const PHOTOREALISTIC_QUALITY_FLOOR_COMPACT =
   'Premium photorealistic photography: natural detail, true-to-life skin, food and fabric — never oversharpened, ' +
   'plastic-looking, or oversaturated.'
 const REFERENCE_IS_GUIDE_COMPACT =
-  "Use the reference photo only as a guide for the container's shape, structure, and color; build a new scene " +
-  '(new background, framing, and people).'
+  "Use the reference photo only as a guide for the container's design; build a new photograph with a new " +
+  'angle, distance, background, framing and people.'
 const SCENE_IS_CREATIVE_BRIEF_COMPACT =
   "Brand details are constraints if they appear, never the reason the scene exists; the scene's own style governs."
 
@@ -1062,9 +1085,16 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   const unitBlockOptions = { compact, proportions: !!job.unitProportions }
   const contentsRule = compact ? SCENE_CONTENTS_RULE_COMPACT : SCENE_CONTENTS_RULE
   const qualityFloor = compact ? PHOTOREALISTIC_QUALITY_FLOOR_COMPACT : PHOTOREALISTIC_QUALITY_FLOOR
-  const guideNotCopy = compact ? REFERENCE_IS_GUIDE_COMPACT : REFERENCE_IS_GUIDE_NOT_COPY
+  const guideNotCopy = interiorRef
+    ? REFERENCE_IS_GUIDE_INTERIOR
+    : compact
+      ? REFERENCE_IS_GUIDE_COMPACT
+      : REFERENCE_IS_GUIDE_NOT_COPY
   const castRefs = (job.castReferences ?? []).slice(0, MAX_CAST_REFERENCES)
-  const castRefClause = castReferenceClause(castRefs, showSubject)
+  // Interior scenes attach every interior photo (two viewpoints of one store)
+  // so the model can infer the room rather than copy a single frame.
+  const interiorExtras = interiorRef ? brand.referenceImages.interior.filter((r) => r.url !== interiorRef.url) : []
+  const castRefClause = castReferenceClause(castRefs, showSubject ? 1 + interiorExtras.length : 0)
 
   // Everything below is a fixed brand/safety constraint sent in full,
   // always — see limits.ts's PROMPT_LIMITS.sceneImage for why these can
@@ -1075,8 +1105,16 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
   // frame. SCENE_IS_CREATIVE_BRIEF only matters when brand details are
   // actually in the prompt (it tells the model those are constraints, not
   // the point) — a 'none' scene carries no brand details for it to govern.
+  const freshField = (v: string | undefined) => (v?.trim() ? truncateToFit(v.trim(), PLAN_FIELD_MAX_CHARS) : '')
+  const freshClause = [
+    showSubject && freshField(job.unitFraming) ? `Framing for this scene: ${freshField(job.unitFraming)}.` : '',
+    freshField(job.sceneEnvironment) ? `Surroundings: ${freshField(job.sceneEnvironment)}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const fixedParts = [
     castRefClause,
+    freshClause,
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
@@ -1188,6 +1226,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     // draw, not a trailing constraint.
     cast,
     castRefClause,
+    freshClause,
     continuityClause,
     guardClause,
     // Same look per pipeline (not per scene) — keeps lighting/atmosphere
@@ -1229,9 +1268,8 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
 
   const prompt = parts.filter(Boolean).join(' ')
   assertNoContradiction(prompt, brand)
-  return castRefs.length > 0
-    ? { prompt, referenceImageUrl, extraReferenceImageUrls: castRefs.map((r) => r.url) }
-    : { prompt, referenceImageUrl }
+  const extras = [...interiorExtras.map((r) => r.url), ...castRefs.map((r) => r.url)]
+  return extras.length > 0 ? { prompt, referenceImageUrl, extraReferenceImageUrls: extras } : { prompt, referenceImageUrl }
 }
 
 interface SceneImageEditJob {
@@ -1277,6 +1315,9 @@ export function composeSceneImageEditPrompt(brand: BrandProfile, job: SceneImage
 }
 
 interface SceneVideoJob {
+  /** True for the single re-render after a moving-camera clip drifted: the
+   *  prompt goes back to the locked-off wording whatever CAMERA_MOVES says. */
+  forceStaticCamera?: boolean
   /** Pre-resolved via appUiVideoClause(brand, appPresence); '' / omitted adds nothing. */
   appUiVideoClause?: string
   /** Pre-resolved via sceneGuardVideoClause(brand, unitPresence, appPresence). */
@@ -1460,15 +1501,29 @@ const NO_ENTRY_EXIT_CLIP_CLAUSE =
 const WORDMARK_LEGIBILITY_CLAUSE =
   ' Keep the brand wordmark identical and legible in every frame.'
 
+// Camera-freedom wording (CAMERA_MOVES on). The move itself comes from the motion
+// line / shot notes; these clauses only bound it so the background cannot drift.
+const CAMERA_MOVING_MOTION_CLAUSE =
+  ' The camera makes only the single slow, smooth move described above (or holds still if none is described); ' +
+  'everything else holds still, with steady lighting. The background stays physically consistent with the ' +
+  'reference frame: nothing in it repeats, morphs or changes. The reference frame is the source of truth: every ' +
+  'person, limb, and object stays exactly as shown.'
+const CAMERA_MOVING_FALLBACK_CLAUSE =
+  ' The camera may make at most one slow, smooth move if the shot notes ask for one, otherwise it holds still; no ' +
+  'whip pans, crash zooms or orbits. One continuous take.'
+
 export function composeSceneVideoPrompt(job: SceneVideoJob): string {
   const appClause = (job.appUiVideoClause ?? '') + (job.sceneGuardVideoClause ?? '')
   const hasUnit = !!job.unitPresence && job.unitPresence !== 'none'
+  const moves = job.forceStaticCamera ? false : cameraMovesEnabled()
   if (job.motion) {
     return (
       job.motion +
-      ' Locked-off, static camera. Only the movement above occurs; everything else holds perfectly still, with a ' +
-      'fixed background and steady lighting. The reference frame is the source of truth: every person, limb, and ' +
-      'object stays exactly as shown.' +
+      (moves
+        ? CAMERA_MOVING_MOTION_CLAUSE + NO_REPEATING_BACKGROUND_CLAUSE
+        : ' Locked-off, static camera. Only the movement above occurs; everything else holds perfectly still, with a ' +
+          'fixed background and steady lighting. The reference frame is the source of truth: every person, limb, and ' +
+          'object stays exactly as shown.') +
       GROUNDED_CLAUSE +
       (job.doorInFrame ? NO_ENTRY_EXIT_CLIP_CLAUSE : '') +
       SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE +
@@ -1488,8 +1543,11 @@ export function composeSceneVideoPrompt(job: SceneVideoJob): string {
     'motion already implied by the setting — wind moving hair, fabric, or leaves, water, ' +
     'shifting light — where every motion has a real ' +
     'cause: produce, goods and other solid objects at rest stay still unless a ' +
-    'visible hand, wind, or other real force moves them. Locked-off, static camera: no pan, tilt, ' +
-    'tracking, dolly or zoom. One continuous take. The reference frame is the source of truth — ' +
+    'visible hand, wind, or other real force moves them. ' +
+    (moves
+      ? CAMERA_MOVING_FALLBACK_CLAUSE.trimStart()
+      : 'Locked-off, static camera: no pan, tilt, tracking, dolly or zoom. One continuous take.') +
+    ' The reference frame is the source of truth — ' +
     peopleClause +
     GROUNDED_CLAUSE +
     (job.doorInFrame ? NO_ENTRY_EXIT_CLIP_CLAUSE : '') +

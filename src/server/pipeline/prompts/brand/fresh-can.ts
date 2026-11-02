@@ -39,6 +39,34 @@ export const BRAND_PROFILE: BrandProfile = {
     'Vancouver, Ontario) — "Canada" is the only place name to use. Leave the reader feeling hopeful, not ' +
     'lectured.',
 
+  narrationTells: [
+    'hearts sink',
+    'heart sinks',
+    'heart sank',
+    'relieved smile',
+    'relieved smiles',
+    'keeps essentials close',
+    'keeps everyday essentials close',
+    'essentials close',
+    'close to home',
+    'more room for',
+    'less stress',
+    'togetherness',
+    'just in time',
+    'laughter, and',
+    'every bite',
+    'a taste of',
+    'plans change',
+    'meant for nobody else',
+    'for nobody else',
+  ],
+  // Each hard fact about how the service works is stated once per video, in
+  // the scene it fits best — never recited scene after scene.
+  narrationHardFacts: [
+    { label: 'payment', pattern: '\\b(?:pay|pays|paid|payment|charged|billing|checkout|card|paiement|payer|payé|carte|caisse|facturé)\\b' },
+    { label: 'the QR scan', pattern: '\\b(?:scan|scans|scanned|scanning|qr|reader|scanne|scanner|lecteur)\\b' },
+    { label: 'the account', pattern: '\\b(?:account|registered|register|sign(?:ed)? up|compte|inscri\\w*)\\b' },
+  ],
   bannedWords: [
     'seamlessly',
     'effortlessly',

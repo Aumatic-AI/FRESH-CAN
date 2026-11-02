@@ -1,3 +1,4 @@
+import { cameraMovesEnabled } from '../lib/cameraMoves'
 import {
   ProviderCallError,
   type ScriptGenerator,
@@ -148,11 +149,27 @@ export const THIRD_PARTY_BRAND_VALIDATION_CLAUSE =
   'vehicles or signs) other than Fresh-CAN; blurred, tiny or invented-looking text is not a defect. Use the ' +
   'text "legible third-party brand name or logo".'
 
-export function buildImageValidationSystemPrompt(unitPresence?: 'none' | 'background' | 'featured'): string {
+// Appended only when real reference photos are attached after the image under
+// review: the image is judged against the REAL design, not just against rules in
+// words. Angle, background, light, weather and people legitimately differ.
+export const REFERENCE_MATCH_ISSUE = 'does not match the real container/interior reference'
+export const REFERENCE_MATCH_VALIDATION_CLAUSE =
+  ' The images after the first are REAL reference photos of the Fresh-CAN container and/or store interior. ' +
+  'Compare the first image to them and report as blocking only a clear contradiction of the DESIGN: a different ' +
+  'colour, the "Fresh CAN" wordmark missing or repeated, the glass door or QR panel in the wrong place or an extra ' +
+  'opening, or interior fixtures (shelving, refrigerated cases, flooring) that the real interior does not have ' +
+  `and invented items that are not in the reference. Use the text "${REFERENCE_MATCH_ISSUE}". A different ` +
+  'camera angle, distance, background, light, weather, season or people is expected and must NOT be reported.'
+
+export function buildImageValidationSystemPrompt(
+  unitPresence?: 'none' | 'background' | 'featured',
+  hasReferences = false,
+): string {
   let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE
   if (unitPresence === 'background' || unitPresence === 'featured') {
     prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
   }
+  if (hasReferences) prompt += REFERENCE_MATCH_VALIDATION_CLAUSE
   return prompt
 }
 
@@ -211,12 +228,13 @@ export class OpenAIImageValidator implements ImageValidator {
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence) },
+          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence, !!input.referenceImageUrls?.length) },
           {
             role: 'user',
             content: [
               { type: 'text', text: sceneText },
               { type: 'image_url', image_url: { url: input.imageUrl } },
+              ...(input.referenceImageUrls ?? []).map((url) => ({ type: 'image_url' as const, image_url: { url } })),
             ],
           },
         ],
@@ -255,6 +273,7 @@ export const CLIP_ISSUE_PEOPLE = 'extra or duplicated person in the clip'
 export const CLIP_ISSUE_DOORWAY = 'someone crossing or emerging from the unit, or its door swinging open'
 export const CLIP_ISSUE_OBJECT = 'new object that is not in the source still'
 export const CLIP_ISSUE_MORPH = 'container or wordmark morphing or garbled'
+export const CLIP_ISSUE_BACKGROUND = 'background repeating, scrolling or morphing'
 
 export const CLIP_VALIDATION_SYSTEM_PROMPT =
   'You are a strict visual QA reviewer for short AI-generated video clips. Image 1 is the SOURCE STILL the clip was ' +
@@ -264,7 +283,8 @@ export const CLIP_VALIDATION_SYSTEM_PROMPT =
   `(1) more distinct people than the still shows, a person appearing, walking in, or a ghostly or blurred duplicate figure — use the text "${CLIP_ISSUE_PEOPLE}"; ` +
   `(2) anyone stepping out of, emerging from, entering, or standing in the doorway of the maroon shipping container, or its door swinging open or closed when the still shows it otherwise — use the text "${CLIP_ISSUE_DOORWAY}"; ` +
   `(3) a new significant object (a cup, box, bag, tool) in someone's hands or the scene that the still and description do not show — use the text "${CLIP_ISSUE_OBJECT}"; ` +
-  `(4) the container clearly changing shape or size, a truck, cab, wheels or any vehicle part appearing under or attached to it, or its "Fresh CAN" wordmark turning into clearly misspelled or garbled letters where it was legible in the still — use the text "${CLIP_ISSUE_MORPH}". ` +
+  `(4) the container clearly changing shape or size, a truck, cab, wheels or any vehicle part appearing under or attached to it, or its "Fresh CAN" wordmark turning into clearly misspelled or garbled letters where it was legible in the still — use the text "${CLIP_ISSUE_MORPH}"; ` +
+  `(5) the background repeating the same objects, scrolling unnaturally, or buildings, trees or objects clearly changing shape or position between frames while the camera is not meant to travel that far — use the text "${CLIP_ISSUE_BACKGROUND}". ` +
   'Ignore ordinary subject motion, camera-consistent changes of pose, expression and lighting, motion blur on a ' +
   'moving limb, anything described in the scene description, and small or distant text that was never legible. ' +
   'Respond with strictly valid JSON: { "issues": [ { "text": string, "severity": "blocking" | "minor", ' +
@@ -338,6 +358,24 @@ export const CLIP_MOTION_SYSTEM_PROMPT =
   'camera out of it: it is locked off. Leave reflections and anything not in the frame out. Reply with the ' +
   'sentences only: no quotes, no labels.'
 
+// Same writer with camera freedom: one slow, motivated move is allowed. The move
+// must keep the subject in the foreground and the background simple, because the
+// video model repeats and morphs a scrolling background (jobs a64ab879, 369ff9de).
+export const CLIP_MOTION_SYSTEM_PROMPT_MOVING =
+  'You write the motion prompt for an image-to-video model. The model already sees the attached still frame, ' +
+  'so describe only what moves, never what the image looks like. Write TWO or THREE plain sentences (under 340 ' +
+  'characters): first, at most ONE slow, smooth, motivated camera move that fits the scene intent and shot notes ' +
+  '(for example a gentle push-in, a slow pull-back, a slider move past a foreground object, a slow zoom with the ' +
+  'camera fixed, a gentle handheld drift, or a short reverse-tracking shot), saying how it starts and ends — or ' +
+  '"static camera" when the moment is best held; then one or two small, concrete, natural actions of the people or ' +
+  'things already visible in the frame (a gesture, a head turn, a step, a breath, a smile), plus light ambient ' +
+  'motion only if the frame already implies it. Keep the subject in the foreground and the background simple and ' +
+  'physically consistent with the frame, so nothing repeats, morphs or changes. Never an orbit around a face, a ' +
+  'whip pan, a crash zoom, a fly-through of a doorway or a long follow shot. Pace everything to the clip length. ' +
+  'Take the actions from the scene intent and keep their direction exactly as written there. Mention only people ' +
+  'and objects that are visible in the frame. Leave reflections and anything not in the frame out. Reply with the ' +
+  'sentences only: no quotes, no labels.'
+
 // Only sent when a door is actually in the frame (rear views). Saying "door"
 // for every scene made the writer put doors into sidewalk shots ("She stays
 // outside the doorway", job d289e3af scene 1) and the video model drew them.
@@ -359,7 +397,10 @@ export class OpenAIClipMotionWriter implements ClipMotionWriter {
       body: JSON.stringify({
         model: this.model,
         messages: [
-          { role: 'system', content: CLIP_MOTION_SYSTEM_PROMPT },
+          {
+            role: 'system',
+            content: (input.cameraMoves ?? cameraMovesEnabled()) ? CLIP_MOTION_SYSTEM_PROMPT_MOVING : CLIP_MOTION_SYSTEM_PROMPT,
+          },
           {
             role: 'user',
             content: [

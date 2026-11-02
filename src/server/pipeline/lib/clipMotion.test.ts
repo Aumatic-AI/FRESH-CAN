@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { lintClipMotion } from './clipMotion'
+
+// These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
+vi.stubEnv('CAMERA_MOVES', 'off')
+
 
 describe('lintClipMotion', () => {
   it('accepts a short motion-only line and trims quotes/whitespace', () => {

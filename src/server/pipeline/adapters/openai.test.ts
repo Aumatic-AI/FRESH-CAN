@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { OpenAIScriptGenerator, OpenAIImageValidator, OpenAIClipValidator, OpenAIClipMotionWriter, CLIP_MOTION_SYSTEM_PROMPT, CLIP_ISSUE_PEOPLE, CLIP_VALIDATION_SYSTEM_PROMPT } from './openai'
 import { ProviderCallError } from './types'
 
+// These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
+vi.stubEnv('CAMERA_MOVES', 'off')
+
+
 function mockFetch(response: Partial<Response> & { jsonBody?: unknown; textBody?: string }) {
   return vi.fn(async () => ({
     ok: response.ok ?? true,

@@ -513,6 +513,28 @@ export async function getVideoPlanDraftData(
   return draftData && typeof draftData === 'object' ? (draftData as Record<string, unknown>) : null
 }
 
+/** The `draft_data` of the most recent video script drafts (newest first),
+ *  excluding one job — read by generateScript.ts so a new video can avoid
+ *  repeating the look and places recent videos used. Best-effort: callers
+ *  treat any error as "no recent data". */
+export async function getRecentVideoPlanDrafts(
+  client: SupabaseClient,
+  excludeJobId: string,
+  limit = 5,
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await client
+    .from('content_drafts')
+    .select('draft_data')
+    .eq('content_type', 'video')
+    .neq('job_id', excludeJobId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? [])
+    .map((r: { draft_data: unknown }) => r.draft_data)
+    .filter((d: unknown): d is Record<string, unknown> => !!d && typeof d === 'object')
+}
+
 /**
  * How many failed_retryable attempts of `stepName` at `generation` carry an
  * error_message starting with `prefix` — used by generateSceneVisual.ts to

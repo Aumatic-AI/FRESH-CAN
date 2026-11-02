@@ -14,6 +14,7 @@ import {
 } from '../../db'
 import { hasExceededMaxAttempts, isReadyToRetry, MAX_ATTEMPTS } from '../../lib/backoff'
 import { BRAND_PROFILE, composeLocalizeScriptSystemPrompt } from '../../prompts/index'
+import { findNarrationStyleIssues } from '../../lib/narrationStyle'
 import {
   NARRATION_WORDS_PER_SECOND,
   narrationWordCount,
@@ -288,6 +289,44 @@ export async function writeNarration(
         !narrationUsesBrandPossessive(candidate, BRAND_PROFILE.name) &&
         bandDistance(narrationWordCount(candidate), target, wordsPerSecond) <=
           bandDistance(narrationWordCount(current), target, wordsPerSecond),
+    )
+  }
+
+  // 4. Narration that reads as machine-written (see lib/narrationStyle.ts):
+  // semicolons, first person, clichés, bare lists, telegraphic runs, a fact the
+  // service-mechanics repeated across scenes. ONE rewrite per flagged scene, kept
+  // only if it has fewer problems AND fits the word band no worse than before
+  // (the same guard as the passes above), so audio/video timing is never traded
+  // for style. Runs last, so its accept test also re-checks the earlier rules.
+  const styleOpts = { tells: BRAND_PROFILE.narrationTells, hardFacts: BRAND_PROFILE.narrationHardFacts }
+  // Skipped when a non-English track is translating wording the creator already
+  // approved: that text is theirs, and restyling it would drift from what they signed off.
+  const translatingApproved = opts.language !== 'English' && scenes.some((s) => readSceneNarration(s.narration_intent).trim() !== '')
+  const styleIssues = translatingApproved ? new Map<number, string[]>() : findNarrationStyleIssues(localized, styleOpts)
+  if (styleIssues.size > 0) {
+    const issueCount = (n: number, text: string) =>
+      findNarrationStyleIssues(
+        localized.map((l) => (l.scene_number === n ? { scene_number: n, narration_text: text } : l)),
+        styleOpts,
+      ).get(n)?.length ?? 0
+    await rewriteScenes(
+      [...styleIssues.keys()],
+      (n) => ({
+        previous_narration_must_change: localized.find((l) => l.scene_number === n)?.narration_text,
+        rewrite_note:
+          `The previous narration ${(styleIssues.get(n) ?? []).join('; and ')}. Rewrite it as a person would say it ` +
+          'aloud while telling this story, in the third person, keeping the same meaning and the same word band.',
+      }),
+      (current, candidate, target) => {
+        const n = localized.find((l) => l.narration_text === current)?.scene_number ?? -1
+        return (
+          !narrationDescribesCrossing(candidate) &&
+          !narrationUsesBrandPossessive(candidate, BRAND_PROFILE.name) &&
+          issueCount(n, candidate) < (styleIssues.get(n)?.length ?? 0) &&
+          bandDistance(narrationWordCount(candidate), target, wordsPerSecond) <=
+            bandDistance(narrationWordCount(current), target, wordsPerSecond)
+        )
+      },
     )
   }
   return localized

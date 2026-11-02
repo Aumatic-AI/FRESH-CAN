@@ -240,6 +240,14 @@ export interface BrandProfile {
   voiceGuidelines: string
   /** Overused AI-marketing-copy phrases to steer generated text away from. */
   bannedWords: readonly string[]
+  /** Stock phrases that make spoken narration sound machine-written (clichés,
+   *  slogan-like closers). Plain lowercase phrases; sent to the narration
+   *  prompt and enforced by lib/narrationStyle.ts. */
+  narrationTells?: readonly string[]
+  /** Brand facts the narration may state only ONCE across a whole video (the
+   *  journey/mechanics). `pattern` is a case-insensitive regex source covering
+   *  the wording in every supported language. */
+  narrationHardFacts?: readonly { label: string; pattern: string }[]
   /**
    * Real, verified facts/statistics the model MAY cite if genuinely relevant
    * to a given topic — never required, never to be paraphrased into a

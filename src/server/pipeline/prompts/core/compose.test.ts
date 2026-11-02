@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   composeHeroPrompt,
   composeInlinePrompt,
@@ -14,6 +14,10 @@ import {
 import type { BrandProfile } from '../types'
 import { BRAND_PROFILE } from '../brand/fresh-can'
 import { PROMPT_LIMITS } from './limits'
+
+// These suites cover the locked-off (CAMERA_MOVES=off) rules; the camera-freedom behaviour has its own tests at the end of each file / in cameraMoves.test.ts.
+vi.stubEnv('CAMERA_MOVES', 'off')
+
 
 const testBrand: BrandProfile = {
   name: 'Test Brand',
@@ -1671,5 +1675,54 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
     const out = composeSceneImagePrompt(BRAND_PROFILE, { ...sceneJob, unitPresence: 'featured' })
     expect(out.extraReferenceImageUrls).toBeUndefined()
     expect(out.prompt).not.toContain('Person reference photos')
+  })
+})
+
+
+describe('Part A: reference is identity only, scene is creative', () => {
+  const base = {
+    pipelineId: 'p1',
+    sceneNumber: 3,
+    visualDescription: 'A woman picks lemons',
+    shotNotes: null,
+    characterRefUrl: 'https://example.com/character-ref.jpg',
+    unitPresence: 'featured' as const,
+  }
+
+  it('exterior scene tells the model to choose a new angle, height, distance and surroundings', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, base)
+    expect(out.prompt).toContain('NEW photograph')
+    expect(out.prompt).toContain('new camera angle, height and distance')
+    expect(out.referenceImageUrl).toBe(base.characterRefUrl)
+  })
+
+  it('interior scene attaches every interior photo and says they are two viewpoints of one store', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, { ...base, setting: 'interior' })
+    const interior = BRAND_PROFILE.referenceImages.interior.map((r) => r.url)
+    expect(interior).toContain(out.referenceImageUrl)
+    expect(out.extraReferenceImageUrls).toEqual(interior.filter((u) => u !== out.referenceImageUrl))
+    expect(out.prompt).toContain('same store from two viewpoints')
+    expect(out.prompt).toContain('different part of the aisle')
+  })
+
+  it('cast portraits are numbered after all location images', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, {
+      ...base,
+      setting: 'interior',
+      castReferences: [{ id: 'a', label: 'the resident', url: 'https://example.com/a.png' }],
+    })
+    expect(out.prompt).toContain('Images 1-2 are the location reference')
+    expect(out.prompt).toContain('image 3 is the resident')
+    expect(out.extraReferenceImageUrls!.at(-1)).toBe('https://example.com/a.png')
+  })
+
+  it('planned framing and surroundings are spliced in; framing only for unit scenes', () => {
+    const job = { ...base, unitFraming: 'low angle from the kerb, wide', sceneEnvironment: 'light snow, late afternoon' }
+    const featured = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+    expect(featured).toContain('Framing for this scene: low angle from the kerb, wide.')
+    expect(featured).toContain('Surroundings: light snow, late afternoon.')
+    const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitPresence: 'none' }).prompt
+    expect(none).not.toContain('Framing for this scene')
+    expect(none).toContain('Surroundings: light snow, late afternoon.')
   })
 })

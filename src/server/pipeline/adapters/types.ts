@@ -123,6 +123,10 @@ export interface ImageValidationInput {
    *  (no door/hatch/opening on the long sides or plain end; no truck, cab or wheels). Omitted or 'none' = the
    *  original checks only. */
   unitPresence?: 'none' | 'background' | 'featured'
+  /** Real reference photo(s) of the container / interior the scene was built
+   *  from. When set, the validator compares the image against them and reports
+   *  a clear contradiction of the DESIGN (never of angle, background or people). */
+  referenceImageUrls?: string[]
 }
 
 export interface ImageValidationResult {
@@ -188,6 +192,9 @@ export interface ClipMotionInput {
   /** True only when the unit's door is in the frame (rear views) — the only
    *  case where the writer is told about a door at all. */
   doorInFrame?: boolean
+  /** Allow one slow, motivated camera move (default: CAMERA_MOVES env, on).
+   *  False = locked-off clip. */
+  cameraMoves?: boolean
 }
 
 /** Writes the short, motion-only prompt for the image-to-video model from the
