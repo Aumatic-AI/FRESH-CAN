@@ -125,18 +125,19 @@ const IMAGE_VALIDATION_SYSTEM_PROMPT =
   'confidence only when the defect is unambiguous, not merely possible.'
 
 // Appended only when the unit can appear in the scene (ImageValidationInput.
-// unitPresence). The truck's front and side panels are solid steel; the model
+// unitPresence). The container's long sides and plain end are solid steel; the model
 // keeps drawing a door/hatch there wherever a scene shows someone entering,
 // leaving or shopping. Same blocking/high bar as every other check.
 export const UNIT_STRUCTURE_VALIDATION_CLAUSE =
-  ' ALSO, when the white box truck with a maroon cargo container appears: report as blocking a door, hatch, ' +
-  'service window, vent or any other opening on the truck\'s LONG side panel (the long face carrying the ' +
-  '"Fresh CAN" wordmark) or on its front face, and a "Fresh CAN" wordmark appearing more than once on one ' +
-  'side panel. The truck\'s REAR face holds its only opening, a black-frame glass double door: that door, and ' +
-  'the rear face next to the long side in a three-quarter view, are normal and must NOT be reported. Use the ' +
-  'text "door or opening drawn on the truck\'s side or front". Also report as blocking a truck whose overall shape ' +
-  'is clearly wrong — a cube, a container with no cab, or a vehicle far shorter or taller than a normal box ' +
-  'truck — using the text "truck shape clearly wrong".'
+  ' ALSO, when the maroon shipping container (the Fresh-CAN unit) appears, from any angle: report as blocking ' +
+  'a door, hatch, service window, vent or any other opening on a LONG side panel (the long faces carrying the ' +
+  '"Fresh CAN" wordmark) or on its plain end face, and a "Fresh CAN" wordmark appearing more than once on one ' +
+  'side panel. The container has exactly one opening, a black-frame glass double door on ONE end face (with a ' +
+  'small white QR panel beside it): that door, wherever it is visible, is normal and must NOT be reported. Use ' +
+  'the text "door or opening drawn on the container\'s side or plain end". Also report as blocking any truck, ' +
+  'cab, wheels, trailer, chassis or other vehicle part under or attached to the container — using the text ' +
+  '"truck, cab or wheels visible" — and a container whose overall shape is clearly wrong (a cube, or far ' +
+  'shorter or taller than a standard long, low shipping container) — using the text "container shape clearly wrong".'
 
 // Always on (every scene): a readable third-party brand on packaging, clothing
 // or signage (real job a64ab879: a chip bag legibly reading "Doritos") breaks
@@ -147,21 +148,10 @@ export const THIRD_PARTY_BRAND_VALIDATION_CLAUSE =
   'vehicles or signs) other than Fresh-CAN; blurred, tiny or invented-looking text is not a defect. Use the ' +
   'text "legible third-party brand name or logo".'
 
-// Appended when the plan says the shot frames the unit's rear: the glass
-// double door (and the small white QR panel beside it) is then expected, so a
-// rear 3/4 view is never rejected as a "door on the side".
-export const REAR_VIEW_VALIDATION_CLAUSE =
-  ' This scene is planned as a view of the truck\'s REAR: the rear glass double door, and the small white QR panel ' +
-  'beside it, are expected and must NOT be reported.'
-
-export function buildImageValidationSystemPrompt(
-  unitPresence?: 'none' | 'background' | 'featured',
-  unitView?: 'side' | 'rear34' | 'rear',
-): string {
+export function buildImageValidationSystemPrompt(unitPresence?: 'none' | 'background' | 'featured'): string {
   let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE
   if (unitPresence === 'background' || unitPresence === 'featured') {
     prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
-    if (unitView === 'rear' || unitView === 'rear34') prompt += REAR_VIEW_VALIDATION_CLAUSE
   }
   return prompt
 }
@@ -221,7 +211,7 @@ export class OpenAIImageValidator implements ImageValidator {
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence, input.unitView) },
+          { role: 'system', content: buildImageValidationSystemPrompt(input.unitPresence) },
           {
             role: 'user',
             content: [
@@ -264,7 +254,7 @@ export class OpenAIImageValidator implements ImageValidator {
 export const CLIP_ISSUE_PEOPLE = 'extra or duplicated person in the clip'
 export const CLIP_ISSUE_DOORWAY = 'someone crossing or emerging from the unit, or its door swinging open'
 export const CLIP_ISSUE_OBJECT = 'new object that is not in the source still'
-export const CLIP_ISSUE_MORPH = 'truck or wordmark morphing or garbled'
+export const CLIP_ISSUE_MORPH = 'container or wordmark morphing or garbled'
 
 export const CLIP_VALIDATION_SYSTEM_PROMPT =
   'You are a strict visual QA reviewer for short AI-generated video clips. Image 1 is the SOURCE STILL the clip was ' +
@@ -272,9 +262,9 @@ export const CLIP_VALIDATION_SYSTEM_PROMPT =
   'late). Compare each frame to the still and the scene description. Report ONLY defects the video model ' +
   'introduced that the still does not have: ' +
   `(1) more distinct people than the still shows, a person appearing, walking in, or a ghostly or blurred duplicate figure — use the text "${CLIP_ISSUE_PEOPLE}"; ` +
-  `(2) anyone stepping out of, emerging from, entering, or standing in the doorway of the white box truck with the maroon container, or its door swinging open or closed when the still shows it otherwise — use the text "${CLIP_ISSUE_DOORWAY}"; ` +
+  `(2) anyone stepping out of, emerging from, entering, or standing in the doorway of the maroon shipping container, or its door swinging open or closed when the still shows it otherwise — use the text "${CLIP_ISSUE_DOORWAY}"; ` +
   `(3) a new significant object (a cup, box, bag, tool) in someone's hands or the scene that the still and description do not show — use the text "${CLIP_ISSUE_OBJECT}"; ` +
-  `(4) the truck or its container clearly changing shape or size, or its "Fresh CAN" wordmark turning into clearly misspelled or garbled letters where it was legible in the still — use the text "${CLIP_ISSUE_MORPH}". ` +
+  `(4) the container clearly changing shape or size, a truck, cab, wheels or any vehicle part appearing under or attached to it, or its "Fresh CAN" wordmark turning into clearly misspelled or garbled letters where it was legible in the still — use the text "${CLIP_ISSUE_MORPH}". ` +
   'Ignore ordinary subject motion, camera-consistent changes of pose, expression and lighting, motion blur on a ' +
   'moving limb, anything described in the scene description, and small or distant text that was never legible. ' +
   'Respond with strictly valid JSON: { "issues": [ { "text": string, "severity": "blocking" | "minor", ' +
@@ -294,8 +284,8 @@ export class OpenAIClipValidator implements ClipValidator {
       `Scene description (what the clip is meant to show): ${input.visualDescription}` +
       `${input.shotNotes ? ` Shot notes: ${input.shotNotes}` : ''}` +
       (input.unitPresence === 'background' || input.unitPresence === 'featured'
-        ? ' The Fresh-CAN truck is part of this scene.'
-        : ' No truck is expected in this scene.')
+        ? ' The Fresh-CAN container is part of this scene.'
+        : ' No Fresh-CAN container is expected in this scene.')
 
     const res = await this.fetchImpl('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

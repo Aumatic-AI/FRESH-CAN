@@ -6,18 +6,16 @@ app only ever uses the public URLs pasted into
 `src/server/pipeline/prompts/brand/fresh-can.ts`, since Flux Kontext needs a
 URL it can fetch itself, not a local file).
 
-The exterior set is three retouched photos (2026-10-10), uploaded to the public
-`brand-assets` bucket and wired into `referenceImages.exterior` in
-`src/server/pipeline/prompts/brand/fresh-can.ts`, each tagged with its `view`:
-- `truck_exterior_side_clean.png` (`side`) — full side profile, one wordmark.
-  Always index 0 (the character-ref is generated from it).
-- `truck_exterior_rear34_clean_2.png` (`rear34`) — rear three-quarter view with the QR panel.
-- `truck_exterior_rear_clean_2.png` (`rear`) — straight-on rear door with the QR panel.
+The exterior reference is ONE container-only photo (2026-11-02), uploaded to the
+public `brand-assets` bucket and wired into `referenceImages.exterior` in
+`src/server/pipeline/prompts/brand/fresh-can.ts`:
+- `container.png` — standalone maroon shipping container (no truck, cab or
+  wheels), door end with QR panel plus the long side with the wordmark. It is a
+  design anchor only: scenes frame the container from any angle (no fixed
+  views), and `unit.full` states which face carries what.
 
-The old photos (`truck_exterior_{standing,back,arrival}.png`) were removed; do
-not re-add them (a test fails if they are referenced). Video scenes pick the
-photo matching the planner's `unit_view` (`core/compose.ts` `pickExteriorByView`);
-blog/photo still pick one by hash.
+The old truck photos (`truck_exterior_*.png`) are no longer referenced; they
+stay in the folder only because `lib/watermark.test.ts` reads `truck_exterior_rear_clean_2.png`. Do not re-add a view-tagged photo set.
 
 `freshcan_interior_1.png` / `freshcan_interior_2.png` aren't used — no
 current prompt builds an interior scene, so there's nothing for them to

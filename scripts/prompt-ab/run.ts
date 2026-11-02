@@ -126,7 +126,7 @@ async function main() {
       const composed = composeSceneImagePrompt(BRAND_PROFILE, {
         aspectRatio: '9:16', pipelineId: pipelineId!, sceneNumber: n, visualDescription: scene.visual_description, shotNotes: scene.shot_notes,
         characterRefUrl, previousVisualState: prev ? extractVisualState(prev.narration_intent) : undefined, unitPresence: l2.unit_presence,
-        unitView: l2.setting === 'interior' ? undefined : l2.unit_view, appPresence: l2.app_on_screen, setting: l2.setting, containsFood: l2.contains_food,
+        appPresence: l2.app_on_screen, setting: l2.setting, containsFood: l2.contains_food,
         cast: plan.castBible?.filter((c) => castIds.has(c.id)), look: plan.look, ...VARIANTS[v],
       })
       console.log(`scene ${n} ${v}: ${composed.prompt.length} chars`)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildImageValidationSystemPrompt, UNIT_STRUCTURE_VALIDATION_CLAUSE, REAR_VIEW_VALIDATION_CLAUSE } from './openai'
+import { buildImageValidationSystemPrompt, UNIT_STRUCTURE_VALIDATION_CLAUSE } from './openai'
 import { isUnitDoorIssue, buildCorrectionInstruction } from '../steps/video/generateSceneVisual'
 
 describe('unit-structure validation', () => {
@@ -8,10 +8,10 @@ describe('unit-structure validation', () => {
     expect(base).not.toContain(UNIT_STRUCTURE_VALIDATION_CLAUSE)
     expect(buildImageValidationSystemPrompt(undefined)).toBe(base)
     expect(buildImageValidationSystemPrompt('featured')).toBe(base + UNIT_STRUCTURE_VALIDATION_CLAUSE)
-    expect(buildImageValidationSystemPrompt('background')).toContain('REAR face')
+    expect(buildImageValidationSystemPrompt('background')).toContain('ONE end face')
   })
   it('recognises the door issue and corrects with a positive rule', () => {
-    const issue = "door or opening drawn on the truck's side or front"
+    const issue = "door or opening drawn on the container's side or plain end"
     expect(isUnitDoorIssue(issue)).toBe(true)
     expect(isUnitDoorIssue('disembodied hand floating above the counter')).toBe(false)
     expect(buildCorrectionInstruction([issue])).toMatch(/solid, unbroken maroon/)
@@ -31,13 +31,17 @@ describe('validator scope (post job a64ab879)', () => {
   })
 })
 
-describe('rear-view validator clause', () => {
-  it('is added only for a unit-present rear / rear34 scene', () => {
-    const base = buildImageValidationSystemPrompt('featured')
-    expect(buildImageValidationSystemPrompt('featured', 'rear')).toBe(base + REAR_VIEW_VALIDATION_CLAUSE)
-    expect(buildImageValidationSystemPrompt('background', 'rear34')).toContain(REAR_VIEW_VALIDATION_CLAUSE)
-    expect(buildImageValidationSystemPrompt('featured', 'side')).toBe(base)
-    expect(buildImageValidationSystemPrompt('none', 'rear')).not.toContain(REAR_VIEW_VALIDATION_CLAUSE)
+describe('container-only validator clause', () => {
+  it('is angle-agnostic: flags truck/cab/wheels, accepts the one door end from any view', () => {
+    const p = buildImageValidationSystemPrompt('featured')
+    expect(p).toContain('truck, cab or wheels visible')
+    expect(p).toContain('from any angle')
+    expect(buildImageValidationSystemPrompt('none')).not.toContain('truck, cab or wheels visible')
+  })
+  it('a visible truck/cab/wheels finding gets a container-only correction', async () => {
+    const { buildCorrectionInstruction, isUnitVehicleIssue } = await import('../steps/video/generateSceneVisual')
+    expect(isUnitVehicleIssue('truck, cab or wheels visible')).toBe(true)
+    expect(buildCorrectionInstruction(['truck, cab or wheels visible'])).toMatch(/no truck, cab,\s+wheels/)
   })
 })
 

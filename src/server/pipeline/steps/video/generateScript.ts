@@ -82,10 +82,6 @@ export interface ScriptSceneOutput {
    *  auditing against that checklist). Optional/lenient like every other
    *  Layer 2 field here — a missing rationale never fails the scene. */
   unit_presence_rationale?: string
-  /** Which face of the unit the scene frames; picks the matching reference
-   *  photo. LLM-decided; only meaningful when unit_presence != 'none' and the
-   *  setting is exterior. Undefined falls back to the shared side reference. */
-  unit_view?: 'side' | 'rear34' | 'rear'
   /** Is a person shown using the brand's app on a phone (finding a unit,
    *  scanning the entry QR). Optional/lenient; undefined means 'none'. */
   app_on_screen?: 'none' | 'background' | 'featured'
@@ -157,7 +153,6 @@ function coerceBoolean(value: unknown): boolean | undefined {
 
 const UNIT_PRESENCE_VALUES = new Set(['none', 'background', 'featured'])
 const SETTING_VALUES = new Set(['exterior', 'interior', 'unrelated'])
-const UNIT_VIEW_VALUES = new Set(['side', 'rear34', 'rear'])
 
 function normalizeEnum<T extends string>(value: unknown, allowed: Set<string>): T | undefined {
   return typeof value === 'string' && allowed.has(value) ? (value as T) : undefined
@@ -329,7 +324,6 @@ export function normalizeScriptOutput(parsed: unknown): VideoScriptOutput | null
       props_present: toStringArray(scene.props_present),
       unit_presence: normalizeEnum(scene.unit_presence, UNIT_PRESENCE_VALUES),
       unit_presence_rationale: typeof scene.unit_presence_rationale === 'string' ? scene.unit_presence_rationale : undefined,
-      unit_view: normalizeEnum(scene.unit_view, UNIT_VIEW_VALUES),
       app_on_screen: normalizeEnum(scene.app_on_screen, UNIT_PRESENCE_VALUES),
       setting: normalizeEnum(scene.setting, SETTING_VALUES),
       contains_food: coerceBoolean(scene.contains_food),
@@ -438,7 +432,7 @@ export async function judgeDoorwayCrossings(
   try {
     const result = await scriptGenerator.generate({
       systemPrompt:
-        'You review scenes of a short video about a mobile grocery store (a maroon container truck, "the unit"). ' +
+        'You review scenes of a short video about a mobile grocery store (a standalone maroon shipping container, "the unit"). ' +
         'Decide from MEANING, not keywords, whether a scene\'s visual_description or narration_intent has ANYONE ' +
         'entering the unit, leaving it, coming or stepping out of it ("steps back outside" after shopping counts), ' +
         'emerging from it, going through its door, or standing or starting or ending in its open doorway. ' +
@@ -560,7 +554,6 @@ export function extractVisualState(narrationIntent: unknown): SceneVisualState |
 export interface SceneLayer2Fields {
   unit_presence?: 'none' | 'background' | 'featured'
   unit_presence_rationale?: string
-  unit_view?: 'side' | 'rear34' | 'rear'
   app_on_screen?: 'none' | 'background' | 'featured'
   setting?: 'exterior' | 'interior' | 'unrelated'
   contains_food?: boolean
@@ -574,7 +567,6 @@ export function extractSceneLayer2Fields(narrationIntent: unknown): SceneLayer2F
   return {
     unit_presence: normalizeEnum(v.unit_presence, UNIT_PRESENCE_VALUES),
     unit_presence_rationale: typeof v.unit_presence_rationale === 'string' ? v.unit_presence_rationale : undefined,
-    unit_view: normalizeEnum(v.unit_view, UNIT_VIEW_VALUES),
     app_on_screen: normalizeEnum(v.app_on_screen, UNIT_PRESENCE_VALUES),
     setting: normalizeEnum(v.setting, SETTING_VALUES),
     contains_food: coerceBoolean(v.contains_food),
@@ -716,7 +708,6 @@ export async function runGenerateScript(
             props_present: s.props_present,
             unit_presence: s.unit_presence,
             unit_presence_rationale: s.unit_presence_rationale,
-            unit_view: s.unit_view,
             app_on_screen: s.app_on_screen,
             setting: s.setting,
             contains_food: s.contains_food,

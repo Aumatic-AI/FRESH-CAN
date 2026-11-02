@@ -8,7 +8,6 @@ import {
   composeSceneVideoPrompt,
   composeCharacterRefPrompt,
   composeCastRefPrompt,
-  pickExteriorByView,
   appUiVideoClause,
   sceneGuardVideoClause,
 } from './compose'
@@ -582,7 +581,6 @@ describe('composeSceneImagePrompt', () => {
     const job = {
       ...baseJob,
       unitPresence: 'featured' as const,
-      unitView: 'rear34' as const,
       look: { time_of_day: 'early evening', lighting: 'soft dusk', palette: 'maroon, brick and cream clothing', style_direction: 'understated observational film' },
       cast: [{ id: 'r', role: 'resident', appearance: 'woman with a low ponytail', wardrobe: 'olive jacket' }],
     }
@@ -596,19 +594,18 @@ describe('composeSceneImagePrompt', () => {
     it('keeps every structural fact about the unit and the closed-door / no-text rules', () => {
       const p = composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt
       for (const fact of [
-        'white box truck',
+        'standalone deep maroon',
         '#6B1A1A',
-        'cab is plain white',
-        'appears once, centered, on each of the two side panels',
+        'no truck, cab or wheels',
+        'once on each long side panel',
         'solid, unbroken maroon steel',
         'glass double door',
-        'bumper height',
+        'ground level',
         'QR panel',
         'only entrance',
-        'any other vehicle',
-        'rear door stays closed',
+        'any other object',
+        'The door stays closed',
         'nobody stands in or at the doorway',
-        'rear three-quarter view',
       ]) {
         expect(p, fact).toContain(fact)
       }
@@ -1136,14 +1133,13 @@ describe('composeCharacterRefPrompt', () => {
 // Phase 8's job (§13), not a Phase 1 rewrite.
 describe('Fresh-CAN brand unit descriptor', () => {
   it('describes the sides as solid steel with the rear door as the only opening, in positive terms', () => {
-    expect(BRAND_PROFILE.unit.full).toMatch(/front face and both side panels are\s+solid, unbroken maroon steel/i)
+    expect(BRAND_PROFILE.unit.full).toMatch(/Both long side panels are\s+solid, unbroken corrugated maroon steel/i)
     expect(BRAND_PROFILE.unit.full).toContain('only opening')
     expect(BRAND_PROFILE.unit.full).not.toMatch(/NEVER render/i)
   })
 
-  it('covers the front face too — regression for a real generation showing a door there', () => {
-    expect(BRAND_PROFILE.unit.full).toContain('front face')
-    expect(BRAND_PROFILE.unit.full).toMatch(/front face and both side panels/i)
+  it('covers the plain end too — regression for a real generation showing a door there', () => {
+    expect(BRAND_PROFILE.unit.full).toMatch(/One end face is plain solid maroon/)
   })
 
   it('serves customers only at the rear door — regression for a real generation showing an open service hatch to a customer', () => {
@@ -1151,14 +1147,14 @@ describe('Fresh-CAN brand unit descriptor', () => {
   })
 
   it('confines the logo to the side panels only, and explicitly rules out the front/rear/duplicates — regression for real reference photos actually showing it in 2-3 places at once', () => {
-    expect(BRAND_PROFILE.unit.full).toMatch(/wordmark.*appears once, centered, on each of\s+the two side panels/i)
-    expect(BRAND_PROFILE.unit.full).toContain('nowhere else on the vehicle')
-    expect(BRAND_PROFILE.forbiddenOnUnit.join(' ')).toContain('No wordmark, logo or signage on the front or rear faces')
+    expect(BRAND_PROFILE.unit.full).toMatch(/wordmark.*once on each of the two long side panels/i)
+    expect(BRAND_PROFILE.unit.full).toContain('nowhere else on the container')
+    expect(BRAND_PROFILE.forbiddenOnUnit.join(' ')).toContain('No wordmark, logo or signage on either end face')
   })
 
   it('the first exterior reference photo (character-ref\'s fixed source) shows the logo in exactly that correct side-only location', () => {
     const first = BRAND_PROFILE.referenceImages.exterior[0]
-    expect(first.whatItShows).toContain('full profile view')
+    expect(first.whatItShows).toContain('front three-quarter')
     expect(first.whatItShows).toContain('reproduce that exact wordmark faithfully, once')
   })
 })
@@ -1428,7 +1424,7 @@ describe('Track C: scene video prompt', () => {
   const unitJob = { visualDescription: 'The student pauses beside the unit.', shotNotes: 'Slow tracking shot.' }
 
   it('locks the vehicle design only when the unit is in the reference frame', () => {
-    const lock = "keeps the reference frame's exact silhouette: white cab, flat-topped maroon container"
+    const lock = "keeps the reference frame's exact silhouette: flat-topped maroon container on the ground, no truck, cab or wheels"
     expect(composeSceneVideoPrompt({ ...unitJob, unitPresence: 'featured' })).toContain(lock)
     expect(composeSceneVideoPrompt({ ...unitJob, unitPresence: 'background' })).toContain(lock)
     expect(composeSceneVideoPrompt({ ...unitJob, unitPresence: 'none' })).not.toContain('silhouette')
@@ -1468,7 +1464,7 @@ describe('Track C: brand text no longer invites lettering or exits', () => {
   })
 
   it("keeps the vehicle's real wordmark carve-out", () => {
-    expect(BRAND_PROFILE.noNewTextInstruction).toContain("vehicle's own signage")
+    expect(BRAND_PROFILE.noNewTextInstruction).toContain("container's own signage")
   })
 
   it('does not describe a door in the interior (it prompted people to walk toward an exit)', () => {
@@ -1539,44 +1535,31 @@ describe('exterior reference photos by view', () => {
     unitPresence: 'featured' as const,
   }
 
-  it('every exterior photo is a retouched _clean photo with a distinct view, side first', () => {
+  it('there is exactly one container-only exterior reference, with no fixed view', () => {
     const pool = BRAND_PROFILE.referenceImages.exterior
-    expect(pool.map((r) => r.view)).toEqual(['side', 'rear34', 'rear'])
-    for (const r of pool) expect(r.url).toMatch(/_clean(_2)?\.png$/)
+    expect(pool).toHaveLength(1)
+    expect(pool[0].url).toMatch(/container\.png$/)
+    expect(pool[0].whatItShows).toMatch(/no truck,\s+cab or wheels/)
   })
 
-  it('a rear / rear34 scene edits from that real photo, not the side-view character-ref', () => {
-    for (const view of ['rear', 'rear34'] as const) {
-      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: view })
-      expect(out.referenceImageUrl).toBe(pickExteriorByView(BRAND_PROFILE, view)!.url)
-      expect(out.prompt).toContain('Reference photo:')
-    }
+  it('a unit scene edits from the shared character-ref and allows any angle, door shut', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, job)
+    expect(out.referenceImageUrl).toBe(job.characterRefUrl)
+    expect(out.prompt).toContain('framed from any angle')
+    expect(out.prompt).toContain('The door stays closed and nobody stands in or at the doorway.')
   })
 
-  it('a rear-view scene says the door stays closed and nobody stands in the doorway (no stepping-out animation)', () => {
-    for (const view of ['rear', 'rear34'] as const) {
-      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: view })
-      expect(out.prompt).toContain('The rear door stays closed and nobody stands in or at the doorway.')
-    }
-  })
-
-  it('a side / missing view keeps the shared character-ref', () => {
-    for (const unitView of ['side', undefined] as const) {
-      const out = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView })
-      expect(out.referenceImageUrl).toBe(job.characterRefUrl)
-    }
-  })
-
-  it('an interior scene or a unit-free scene never uses an exterior view photo', () => {
-    const interior = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: 'rear', setting: 'interior' })
-    expect(interior.referenceImageUrl).not.toMatch(/truck_exterior/)
-    const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitView: 'rear', unitPresence: 'none' })
+  it('an interior scene or a unit-free scene never uses the exterior photo', () => {
+    const interior = composeSceneImagePrompt(BRAND_PROFILE, { ...job, setting: 'interior' })
+    expect(interior.referenceImageUrl).not.toMatch(/container\.png/)
+    const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitPresence: 'none' })
     expect(none.referenceImageUrl).toBeUndefined()
   })
 
-  it('rear photo descriptions never ask for a wordmark on the rear face', () => {
-    expect(pickExteriorByView(BRAND_PROFILE, 'rear')!.whatItShows).not.toMatch(/wordmark/i)
-    expect(pickExteriorByView(BRAND_PROFILE, 'rear34')!.whatItShows).toMatch(/rear face\s+carries no wordmark/)
+  it('no unit prompt mentions a truck, cab or wheels except to forbid them', () => {
+    const out = composeSceneImagePrompt(BRAND_PROFILE, job).prompt
+    expect(out).not.toMatch(/box truck|white cab|wheels are always visible/i)
+    expect(BRAND_PROFILE.unit.full).toMatch(/no truck, cab, wheels/)
   })
 })
 
@@ -1659,7 +1642,7 @@ describe('cast reference portraits (job d289e3af: one person, a different face p
     expect(prompt).toContain('Woman of South Asian heritage')
     expect(prompt).toContain('Wearing olive-green jacket')
     expect(prompt).toContain('small silver stud earrings')
-    expect(prompt).toContain('no vehicle')
+    expect(prompt).toContain('no truck or vehicle')
   })
 
   it('attaches the portrait after the vehicle reference and says which image is which', () => {

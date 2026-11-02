@@ -2217,3 +2217,11 @@ Audited the 3 real video jobs from 2026-10-08 (790b8771 44.2s, e4a83ec0 39.1s, 5
 - `prompts/core/composeText.ts` `creativeBriefContext()` now appends a default-people clause: unless the admin's idea explicitly specifies who appears, any people shown are white Canadians (apparent European heritage); an explicit specification overrides it.
 - One shared spot feeds the blog outline, image plan and video script prompts. No types, schema or DB change; existing drafts untouched.
 - Verified: `tsc --noEmit` clean, prompt tests pass (251). Blog image path not traced end-to-end.
+
+## 2026-11-02 — Container-only unit, single free-angle reference
+- Why: the Fresh-CAN unit is now shown as a standalone maroon shipping container only (no truck, cab, wheels), and scenes should not be tied to fixed camera views.
+- One reference: `assets/fresh-can/container.png` (uploaded to `brand-assets`) is the only `referenceImages.exterior` entry. It anchors the design only; the planner's `unit_view` field, the `UnitView` type, `view` on reference images, `pickExteriorByView` and the rear-view validator clause are all removed.
+- Brand text (`brand/fresh-can.ts`): `unit.identity/full/sceneCompact/proportions`, `forbiddenOnUnit` and the business-model negatives now describe a ground-resting container with two long sides (one wordmark each), one plain end and one door end (glass double door + QR). Added "never a truck/cab/wheels/vehicle".
+- Prompts: scene image prompt tells the model it may frame the container from any angle, door shut and empty; clip prompt's design lock, planner `unit_presence` text and vehicle wording now say container.
+- Validators: still check rejects a visible truck/cab/wheels/trailer (retry says "container on the ground, no vehicle part") and accepts the door end from any angle; clip check flags vehicle parts; clip motion lint rejects drive/arrive/park/roll. Clip door-wording (`doorInFrame`) now applies whenever the unit is in an exterior scene.
+- Verified: `tsc` clean. Not verified on a real KIE/OpenAI render: with one reference and free angles expect more drift on the unseen faces (door/QR/wordmark); the structure spec and validator retry are the guard.

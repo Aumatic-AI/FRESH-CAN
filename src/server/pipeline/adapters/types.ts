@@ -120,12 +120,9 @@ export interface ImageValidationInput {
   shotNotes?: string | null
   /** The scene's unit_presence. When the Fresh-CAN unit can appear
    *  ('background' | 'featured'), the validator also checks its structure
-   *  (no door/hatch/opening on the front or side). Omitted or 'none' = the
+   *  (no door/hatch/opening on the long sides or plain end; no truck, cab or wheels). Omitted or 'none' = the
    *  original checks only. */
   unitPresence?: 'none' | 'background' | 'featured'
-  /** The scene's planned unit_view. 'rear'/'rear34' tell the validator the rear
-   *  door is expected in frame. */
-  unitView?: 'side' | 'rear34' | 'rear'
 }
 
 export interface ImageValidationResult {

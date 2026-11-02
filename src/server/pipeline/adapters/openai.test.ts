@@ -186,7 +186,7 @@ describe('OpenAIClipValidator (finished-clip frame check)', () => {
     expect(body.model).toBe('gpt-4o')
     expect(body.messages[0].content).toBe(CLIP_VALIDATION_SYSTEM_PROMPT)
     const user = body.messages[1].content
-    expect(user[0].text).toContain('truck is part of this scene')
+    expect(user[0].text).toContain('container is part of this scene')
     expect(user[1]).toEqual({ type: 'image_url', image_url: { url: input.stillUrl } })
     expect(user.slice(2).map((c: { image_url: { url: string } }) => c.image_url.url)).toEqual(
       frames.map((f) => `data:image/jpeg;base64,${f.toString('base64')}`),
@@ -221,7 +221,7 @@ describe('OpenAIClipValidator (finished-clip frame check)', () => {
       'extra or duplicated person in the clip',
       'someone crossing or emerging from the unit, or its door swinging open',
       'new object that is not in the source still',
-      'truck or wordmark morphing or garbled',
+      'container or wordmark morphing or garbled',
     ]) {
       expect(CLIP_VALIDATION_SYSTEM_PROMPT).toContain(t)
     }

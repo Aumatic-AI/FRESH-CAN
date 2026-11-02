@@ -83,7 +83,7 @@ export const NO_ENTRY_EXIT_RULE =
  */
 export const NO_ENTRY_EXIT_NARRATION_RULE =
   'Narration must never describe anyone entering, exiting, stepping into or out of, climbing into or out of, ' +
-  'or walking through the door of the unit or vehicle — the picture never shows that crossing, so the words ' +
+  'or walking through the door of the unit or container — the picture never shows that crossing, so the words ' +
   'must not either. Say that a person arrives at the unit, is shopping, or heads home with their groceries; ' +
   'never that they "enter", "step in", "walk out", "come out of" or "exit" it.'
 
@@ -576,7 +576,7 @@ function campaignFit(brand: BrandProfile): string {
     'requirement. Find the single most natural moment already in the story for it — wherever food, its origin, a ' +
     'delivery, or a visit is already part of the scene — and have that scene\'s narration_intent call for naming ' +
     `${brand.name} there directly, the way a real person would actually say it out loud in that moment. The ` +
-    'difference from reciting the mission statement or forcing the vehicle in: this is ONE specific, natural ' +
+    'difference from reciting the mission statement or forcing the container in: this is ONE specific, natural ' +
     'mention of the name, grounded in the story\'s own real details, never a slogan, statistic, or pitch stated ' +
     'on top of the scene. Never write a scene whose subject is the brand\'s logo, wordmark, or any graphic/text ' +
     'reveal — no visual_description should ask for the logo to be drawn, shown, or transitioned to; an AI image ' +
@@ -623,9 +623,9 @@ function freshcanRoleAdaptivity(brand: BrandProfile): string {
     'role you classified during planning, not be the same for every idea. For a background, supporting, or ' +
     `enabler role — the idea has only a loose or everyday connection to groceries — keep ${brand.name}'s presence ` +
     'subtle: the required spoken mention above is enough, connected through the story\'s own food, people, ' +
-    'community, or access details; do not force the vehicle, the logo, or the app into the visuals just because ' +
+    'community, or access details; do not force the container, the logo, or the app into the visuals just because ' +
     `the brand is being credited in narration. For a subject or hero role — the idea is directly about ${brand.name}, ` +
-    'its mission, or its service — stronger, more direct branding is earned and appropriate: the vehicle can be a ' +
+    'its mission, or its service — stronger, more direct branding is earned and appropriate: the container can be a ' +
     `real visual presence across multiple scenes, and narration can speak about ${brand.name} more directly, still as ` +
     'part of a genuine story, never as a recited pitch. Every added character, object, location, action, or brand ' +
     `element must have a narrative reason for being there, at any role level — never a random ${brand.name} truck, a ` +
@@ -638,8 +638,8 @@ function freshcanRoleAdaptivity(brand: BrandProfile): string {
 
 function brandAssetFidelity(brand: BrandProfile): string {
   return (
-    `When ${brand.name}'s vehicle, app, or other real assets appear in a scene, describe them only as already true ` +
-    'per the brand facts above — never invent a new logo, redesign the vehicle\'s shape or colors, invent a ' +
+    `When ${brand.name}'s container, app, or other real assets appear in a scene, describe them only as already true ` +
+    'per the brand facts above — never invent a new logo, redesign the container\'s shape or colors, invent a ' +
     `product or service ${brand.name} doesn't actually offer, or add an app feature that isn't real. The app's UI ` +
     'is only ever deep maroon and white, never any other screen color. Use an ' +
     'existing asset because this specific scene\'s idea genuinely calls for it, never merely because it exists.'
@@ -663,7 +663,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
       `"${opts.sceneNotes}". This idea alone decides what the video is about and what happens in it — ` +
       `never blend in or substitute a different topic. ${brand.neutralIdentityLine ?? brand.missionStatement} ` +
       `That is background context for tone and brand accuracy only: a fixed constraint on how the brand's ` +
-      `vehicle, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
+      `container, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
       `second angle, and never a reason to insert brand or mission messaging into a scene the idea doesn't ` +
       `call for.${opts.creativeBrief ? ` ${creativeBriefContext(opts.creativeBrief)}` : ''} ` +
       `${storyPlanningClause(brand)} ${campaignFit(brand)} ${freshcanRoleAdaptivity(brand)} ${brandAssetFidelity(brand)} ` +
@@ -736,18 +736,15 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'subject of this scene, plausibly present in the background, or absent — an honest per-scene read, never a default. ' +
     'Choose "background" or "featured" for every scene that shows a person arriving at, shopping in, or heading away ' +
     'from the unit with their groceries: the scene is drawn from the unit\'s reference image, and a scene marked ' +
-    '"none" has no vehicle reference, so the image model invents its own vehicle. Choose "none" for scenes where the ' +
+    '"none" has no container reference, so the image model invents its own container. Choose "none" for scenes where the ' +
     'unit plays no part in what is shown, such as a home kitchen or a phone screen. Whenever the unit appears, ' +
     'even as "background", it fills at least a third of the frame width so its wordmark reads cleanly — a small ' +
-    'or distant unit gets its wordmark garbled by the video model, so either make it large or choose "none"),\n' +
+    'or distant unit gets its wordmark garbled by the video model, so either make it large or choose "none". The ' +
+    'unit is only a standalone shipping container standing on the ground — never describe it as a truck, ' +
+    'with a cab or wheels, arriving, driving, pulling up or parking. You may frame it from any angle the scene ' +
+    'needs; its door is always shown closed with nobody in or at the doorway),\n' +
     '      "unit_presence_rationale": string (one sentence, honest and specific to this scene, never ' +
     'boilerplate — why you chose that unit_presence value; omit only if unit_presence is "none"),\n' +
-    '      "unit_view": "side" | "rear34" | "rear" (which face of the unit the shot frames, so the image is built ' +
-    'from the matching real photo; omit when unit_presence is "none" or the setting is not exterior. "rear" or ' +
-    '"rear34" for a scene where a customer stands BESIDE the unit scanning the QR panel or waiting to go in; the ' +
-    'door is always shown closed with nobody in or at the doorway; "side" for every other unit scene, ' +
-    'including a customer who has finished shopping and is leaving with groceries, or the unit parked or in the ' +
-    'background. The unit has no door anywhere except its rear),\n' +
     `      "app_on_screen": "none" | "background" | "featured" (is a person shown using the ${brand.name} app on a ` +
     'phone in this scene — searching for a unit, scanning the entry QR code; "featured" when the phone screen is ' +
     'a focal point, "background" when it is merely visible, "none" otherwise — an honest per-scene read, never a ' +
@@ -811,7 +808,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     (opts.sceneNotes
       ? ' Every scene must still serve the creative idea given at the very start of this prompt — never drift ' +
         'into generic brand, mission, or food-desert messaging unless that idea itself genuinely calls for it, ' +
-        'and never force the vehicle into a scene it does not genuinely fit. The vehicle appearing in one ' +
+        'and never force the container into a scene it does not genuinely fit. The container appearing in one ' +
         'scene is never a reason to carry it into a later scene — only include it again if that later scene\'s ' +
         'own idea genuinely calls for it too.' +
         finalSelfCheckClause(brand)

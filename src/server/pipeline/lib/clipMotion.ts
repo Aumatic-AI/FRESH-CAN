@@ -11,6 +11,8 @@ const MIN_MOTION_CHARS = 15
 const REJECT_PATTERNS: readonly RegExp[] = [
   // crossing the unit's doorway (same intent as NO_ENTRY_EXIT_RULE)
   /\b(enter(s|ed|ing)?|exit(s|ed|ing)?|walks? (in|out|into|through)|steps? (in|out|into|inside|through)|stepping (in|out|into|through)|climb(s|ing)? (in|out|into)|comes? out of|leav(es|ing) the (unit|store|truck)|opens?( up)? the door|through the door)\b/i,
+  // the container is not a vehicle: it never drives, arrives, parks or rolls
+  /\b(drives?|driving|drove|pulls? (up|in|away|over)|pulling (up|in|away|over)|arriv(es|ing)|parks?|parking|parked|rolls?|rolling|truck|wheels?|cab)\b/i,
   // camera movement (the clip is locked-off)
   /\b(pan(s|ning)?|tilt(s|ing)?|tracking shot|dolly|zoom(s|ing)?|push[- ]in|pull[- ]back|orbit|rack focus|handheld|camera (moves?|follows?|sweeps?|tracks?))\b/i,
   // anything new arriving in frame

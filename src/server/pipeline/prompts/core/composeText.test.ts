@@ -492,7 +492,8 @@ describe('composeVideoScriptSystemPrompt', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, baseOpts)
     expect(prompt).toContain('fills at least a third of the frame width')
     expect(prompt).toContain('door is always shown closed with nobody in or at the doorway')
-    expect(prompt).toContain('a customer who has finished shopping and is leaving with groceries')
+    expect(prompt).toContain('You may frame it from any angle the scene needs')
+    expect(prompt).not.toContain('unit_view')
   })
 
   it('asks visual_description to include ambient environmental motion, not just the subject', () => {
@@ -667,7 +668,7 @@ describe('composeVideoScriptSystemPrompt', () => {
       ...baseOpts,
       sceneNotes: 'A family picks up groceries on the way home',
     })
-    expect(prompt).toContain('never invent a new logo, redesign the vehicle\'s shape or colors')
+    expect(prompt).toContain('never invent a new logo, redesign the container\'s shape or colors')
     expect(prompt).toContain(`invent a product or service ${testBrand.name} doesn't actually offer`)
   })
 
@@ -826,7 +827,7 @@ describe('unit_presence guidance for arrive/shop/leave scenes (job 65b08e09 scen
 
   it('tells the planner a scene about arriving at, shopping in, or leaving the unit needs the unit reference', () => {
     expect(prompt()).toContain('arriving at, shopping in, or heading away from the unit with their groceries')
-    expect(prompt()).toContain('has no vehicle reference, so the image model invents its own vehicle')
+    expect(prompt()).toContain('has no container reference, so the image model invents its own container')
   })
 
   it('reserves "none" for scenes where the unit plays no part', () => {

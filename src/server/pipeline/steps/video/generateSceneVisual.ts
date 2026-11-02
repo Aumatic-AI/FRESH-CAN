@@ -268,6 +268,12 @@ export function isUnitDoorIssue(issue: string): boolean {
   return /\b(?:door|hatch|service window|vent|opening)\b.*\b(?:side|front|truck|unit|container)\b|\b(?:side|front)\b.*\b(?:door|hatch|opening)\b|wordmark.*more than once/i.test(issue)
 }
 
+/** The validator's "truck, cab or wheels visible" finding — the unit is a
+ *  standalone container, so any vehicle part is a defect. */
+export function isUnitVehicleIssue(issue: string): boolean {
+  return /\b(?:truck|cab|wheels?|trailer|chassis)\b/i.test(issue)
+}
+
 /** The validator's third-party-brand finding (adapters/openai.ts). Like a
  *  collage/door, a from-scratch regeneration with a clear instruction fixes it
  *  better than an edit of the offending image. */
@@ -315,10 +321,16 @@ export function buildCorrectionInstruction(issues: string[]): string {
   if (issues.some(isThirdPartyBrandIssue)) {
     return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
   }
+  if (issues.some(isUnitVehicleIssue)) {
+    return (
+      'The unit is only a standalone maroon shipping container resting directly on the ground: no truck, cab, ' +
+      'wheels, trailer, chassis or any vehicle part anywhere.'
+    )
+  }
   if (issues.some(isUnitDoorIssue)) {
     return (
-      "The truck's front face and both side panels are one solid, unbroken maroon steel wall with no door, hatch, " +
-      'window or opening; its only opening is the glass double door on the rear face, which is not visible here.'
+      "The container's two long side panels and its plain end are solid, unbroken maroon steel with no door, hatch, " +
+      'window or opening; its only opening is the glass double door on the one door end, which is not visible here.'
     )
   }
   return (
@@ -458,7 +470,6 @@ async function runSceneImageStep(
             regenInstructions,
             previousVisualState: previousScene ? extractVisualState(previousScene.narration_intent) : undefined,
             unitPresence: layer2.unit_presence,
-            unitView: layer2.setting === 'interior' ? undefined : layer2.unit_view,
             appPresence: layer2.app_on_screen,
             setting: layer2.setting,
             containsFood: layer2.contains_food,
@@ -532,9 +543,8 @@ async function runSceneImageStep(
             imageUrl: permanentUrl,
             visualDescription: scene.visual_description,
             shotNotes: scene.shot_notes,
-            // An interior scene shows no truck exterior, so the truck-structure
+            // An interior scene shows no container exterior, so the structure
             // check would only misfire (real job a64ab879 scene 2).
-            unitView: extractSceneLayer2Fields(scene.narration_intent).unit_view,
             unitPresence: (() => {
               const l2 = extractSceneLayer2Fields(scene.narration_intent)
               return l2.setting === 'interior' ? 'none' : l2.unit_presence
@@ -837,12 +847,10 @@ async function runSceneVideoClipStep(
         // already reads for the still-image step, no new DB read.
         const layer2 = extractSceneLayer2Fields(scene.narration_intent)
         const durationSeconds = pickClipDurationSeconds(plannedSlotMs(scene.narration_intent, scene.target_duration_ms))
-        // Only rear views show the unit's door; everywhere else the door
-        // wording is left out so the video model has no door to draw.
+        // The container can now be framed from any angle, so whenever the unit
+        // is in an exterior scene its door may be visible: keep it shut/empty.
         const doorInFrame =
-          layer2.setting !== 'interior' &&
-          (layer2.unit_presence ?? 'none') !== 'none' &&
-          (layer2.unit_view === 'rear' || layer2.unit_view === 'rear34')
+          layer2.setting !== 'interior' && (layer2.unit_presence ?? 'none') !== 'none'
         // A short motion-only line written from the approved still (the video
         // model already sees the still, so the scene text is not repeated).
         // Any failure or a line that fails the lint falls back to the

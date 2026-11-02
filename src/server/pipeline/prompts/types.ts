@@ -165,13 +165,7 @@ export interface CreativeBrief {
  * ignore without that correction language leaking into the factual
  * description itself.
  */
-/** Which face of the unit a reference photo / scene shows. */
-export type UnitView = 'side' | 'rear34' | 'rear'
-
 export interface BrandReferenceImage {
-  /** Which face of the unit this photo shows. Lets a scene pick the photo that
-   *  matches its framing (generateScript's `unit_view`) instead of a hash. */
-  view?: UnitView
   /** Publicly fetchable URL — the image adapter's edit-source input must be
    *  able to download it. */
   url: string
@@ -204,7 +198,7 @@ export interface UnitDescriptor {
    *  caller opts into compact fixed text. */
   sceneCompact?: string
   /** Optional one-sentence statement of the unit's proportions (long, low
-   *  container; cab and wheels always visible), appended when requested. */
+   *  container resting on the ground, no cab or wheels), appended when requested. */
   proportions?: string
   /** Interior layout and fixtures. Used only for interior scenes. */
   interior: string

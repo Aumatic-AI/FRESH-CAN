@@ -9,7 +9,6 @@
 import type {
   BrandProfile,
   BrandReferenceImage,
-  UnitView,
   CastBibleEntry,
   ImageStyle,
   SceneVisualState,
@@ -132,16 +131,6 @@ function moodClause(): string {
  *  angle, unlike mood which is shared per pipeline. */
 function pickReferenceFrom(pool: readonly BrandReferenceImage[], seed: string): BrandReferenceImage | undefined {
   return pool.length > 0 ? pickDeterministic(seed, pool) : undefined
-}
-
-/** The brand's exterior photo for a planned view, or undefined when the brand
- *  has none for it. Scene selection is by the planner's `unit_view`, never a
- *  hash, so a scene framing the rear door is built from the rear photo. */
-export function pickExteriorByView(
-  brand: BrandProfile,
-  view: UnitView | undefined,
-): BrandReferenceImage | undefined {
-  return view ? brand.referenceImages.exterior.find((r) => r.view === view) : undefined
 }
 
 type SceneType = 'exterior' | 'interior'
@@ -382,7 +371,7 @@ function watermarkSafeZoneBlock(): string {
 // 'never as a literal photo to copy') exactly, since compose.test.ts
 // asserts on them directly.
 const REFERENCE_IS_GUIDE_NOT_COPY =
-  "Use the reference photo only as a guide for the vehicle's shape, structure, and color — never as a " +
+  "Use the reference photo only as a guide for the container's shape, structure, and color — never as a " +
   "literal photo to copy. Do not reuse its background, framing, composition, or people; build a new scene " +
   'instead.'
 
@@ -409,7 +398,7 @@ const REFERENCE_IS_GUIDE_NOT_COPY =
 function disregardClause(disregard: readonly string[]): string {
   if (disregard.length === 0) return ''
   return (
-    `This particular photo also shows ${disregard.join(', ')} — none of that is part of the vehicle's real, ` +
+    `This particular photo also shows ${disregard.join(', ')} — none of that is part of the container's real, ` +
     `correct design; disregard ${disregard.length > 1 ? 'all of it' : 'it'}.`
   )
 }
@@ -571,7 +560,7 @@ const PHOTOREALISTIC_QUALITY_FLOOR =
 function oneWordmarkOnly(wordmarkText: string): string {
   return (
     `Exactly one "${wordmarkText}" wordmark total, on the side panels only, as described above — no second ` +
-    'or duplicate wordmark, decal, or graphic anywhere else on the vehicle.'
+    'or duplicate wordmark, decal, or graphic anywhere else on the container.'
   )
 }
 
@@ -725,7 +714,7 @@ export function composeCharacterRefPrompt(brand: BrandProfile, job: CharacterRef
   // scene edits from, never a background/incidental appearance by
   // definition.
   const parts = [
-    `A clean, well-lit reference photo of the ${brand.name} branded vehicle.`,
+    `A clean, well-lit reference photo of the ${brand.name} branded standalone shipping container (no truck, cab or wheels).`,
     unitBrandingBlock(brand, 'featured'),
     oneWordmarkOnly(brand.unit.wordmarkText),
     PHOTOREALISTIC_QUALITY_FLOOR,
@@ -803,7 +792,7 @@ export function composeCastRefPrompt(brand: BrandProfile, person: CastBibleEntry
       'in soft, even daylight against a plain light-grey background, the whole body in frame from head to shoes, ' +
       'arms relaxed with both hands visible.',
     ...details,
-    'Only this one person in the frame, no other people, no vehicle, no props beyond what is described.',
+    'Only this one person in the frame, no other people, no truck or vehicle, no props beyond what is described.',
     PHOTOREALISTIC_QUALITY_FLOOR,
     brand.noTextInstruction,
   ]
@@ -887,10 +876,6 @@ interface SceneImageJob {
    *  hallucinated/wrong element, while keeping a harmless quality guard
    *  when food isn't actually present costs nothing but a few characters. */
   unitPresence?: UnitPresence
-  /** THIS scene's planned unit_view. Only 'rear'/'rear34' switch the edit
-   *  source to that real photo (the shared characterRefUrl is a side view, so
-   *  it cannot show the rear door); 'side'/undefined keep characterRefUrl. */
-  unitView?: UnitView
   containsFood?: boolean
   /** THIS scene's own Layer 2 app_on_screen — is a person shown using the
    *  brand's app. Undefined defaults to 'none' (never adds the palette
@@ -921,7 +906,7 @@ interface SceneImageJob {
    *  (scripts/prompt-ab) shows it is no worse than the full text. */
   compactFixedText?: boolean
   /** Opt-in: append the brand's unit proportions sentence (long, low
-   *  container; cab and wheels always visible) wherever the unit is in frame. */
+   *  container resting on the ground, no cab or wheels) wherever the unit is in frame. */
   unitProportions?: boolean
 }
 
@@ -954,16 +939,10 @@ const PHOTOREALISTIC_QUALITY_FLOOR_COMPACT =
   'Premium photorealistic photography: natural detail, true-to-life skin, food and fabric — never oversharpened, ' +
   'plastic-looking, or oversaturated.'
 const REFERENCE_IS_GUIDE_COMPACT =
-  "Use the reference photo only as a guide for the vehicle's shape, structure, and color; build a new scene " +
+  "Use the reference photo only as a guide for the container's shape, structure, and color; build a new scene " +
   '(new background, framing, and people).'
 const SCENE_IS_CREATIVE_BRIEF_COMPACT =
   "Brand details are constraints if they appear, never the reason the scene exists; the scene's own style governs."
-
-const REFERENCE_VIEW_LABEL: Record<UnitView, string> = {
-  side: 'a straight side profile',
-  rear34: 'a rear three-quarter view',
-  rear: 'a straight-on rear view',
-}
 
 /** time of day + lighting only: the palette and style_direction fields are
  *  free script prose (often clothing or story talk) and made the full clause
@@ -1070,19 +1049,15 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     job.setting === 'interior' && (job.unitPresence ?? 'none') !== 'none'
       ? pickReferenceFrom(brand.referenceImages.interior, `${job.pipelineId}:${job.sceneNumber}:interior`)
       : undefined
-  // Rear-facing scenes edit from the matching real photo rather than the
-  // side-view character_ref (which has no door, so the model had to invent one).
-  const viewRef =
-    showSubject && !interiorRef && job.unitView && job.unitView !== 'side'
-      ? pickExteriorByView(brand, job.unitView)
-      : undefined
   const compact = !!job.compactFixedText
-  const viewClause = viewRef
-    ? compact
-      ? `The attached photo shows ${REFERENCE_VIEW_LABEL[job.unitView!]} of the truck; match its structure. ` +
-        'The rear door stays closed and nobody stands in or at the doorway.'
-      : `Reference photo: ${viewRef.whatItShows} The rear door stays closed and nobody stands in or at the doorway.`
-    : ''
+  // The single container reference is a design anchor, not a fixed angle: the
+  // scene may frame the container from any side, and the structure rules say
+  // which face carries what. The door, when visible, is always shut and empty.
+  const viewClause =
+    showSubject && !interiorRef
+      ? 'The container may be framed from any angle that suits the scene; whichever faces show follow the ' +
+        'structure above. The door stays closed and nobody stands in or at the doorway.'
+      : ''
   const look = compact ? sceneLookClauseCompact(job.look) : sceneLookClause(job.look)
   const unitBlockOptions = { compact, proportions: !!job.unitProportions }
   const contentsRule = compact ? SCENE_CONTENTS_RULE_COMPACT : SCENE_CONTENTS_RULE
@@ -1242,7 +1217,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     parts.push(guideNotCopy)
     if (viewClause) parts.push(viewClause)
     parts.push(brand.noNewTextInstruction)
-    referenceImageUrl = interiorRef ? interiorRef.url : (viewRef?.url ?? job.characterRefUrl)
+    referenceImageUrl = interiorRef ? interiorRef.url : job.characterRefUrl
   } else {
     // No reference image attached at all for a non-relevant scene — a pure
     // text-to-image generation, so edit-mode's own bias toward
@@ -1448,7 +1423,7 @@ const SINGLE_SHOT_NO_PACKAGING_TEXT_CLAUSE =
 // truck became a roofed kiosk, and the wordmark garbled with it). Only for
 // scenes whose reference frame actually contains the unit.
 const UNIT_DESIGN_LOCK_CLAUSE =
-  " The vehicle keeps the reference frame's exact silhouette: white cab, flat-topped maroon container."
+  " The container keeps the reference frame's exact silhouette: flat-topped maroon container on the ground, no truck, cab or wheels."
 
 // A photographic/rendering quality floor for the 720p Seedance deliverable,
 // same posture as composeSceneImagePrompt's own PHOTOREALISTIC_QUALITY_FLOOR
@@ -1587,7 +1562,7 @@ export function composePhotoPrompt(brand: BrandProfile, job: PhotoJob): ImageCom
     // hardcoded voice pulling toward "ordinary real-life moment" regardless
     // of what the user actually asked for.
     parts.push(
-      `Build the scene around the vehicle as described above, never a plain reproduction of the reference ` +
+      `Build the scene around the container as described above, never a plain reproduction of the reference ` +
         `photo's own background. ${REFERENCE_IS_GUIDE_NOT_COPY}`,
     )
     const reference = pickReferenceFrom(pool, `${job.pipelineId}:photo`)

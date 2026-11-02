@@ -16,7 +16,7 @@ export const BRAND_PROFILE: BrandProfile = {
 
   missionStatement:
     'Fresh-CAN is a Canadian company operating autonomous, cashierless mobile grocery stores — each a ' +
-    'self-contained, walk-in store built inside a converted shipping container mounted on a box truck — ' +
+    'self-contained, walk-in store built inside a converted shipping container that stands on its own — ' +
     'bringing fresh fruit, vegetables, and everyday food staples directly to streets and communities across ' +
     'Canada. Customers find the nearest unit through the free Fresh-CAN app; on a first visit they register ' +
     'and link a payment card, and on every visit after that they simply scan their app QR code to enter, ' +
@@ -90,6 +90,8 @@ export const BRAND_PROFILE: BrandProfile = {
     'Not an open-air market, farmers\' market stall, produce stand, or pop-up tent.',
     'Not a food truck, canteen, or service-window vendor — customers are never served through a window or ' +
       'hatch.',
+    'Never a truck, cab, wheels, trailer, chassis or any vehicle — the unit is only a standalone shipping ' +
+      'container resting on the ground, never driving, parked as a vehicle, hauled or loaded onto a vehicle.',
     'Not a freight/transport/logistics operation — the unit is never shown as cargo being hauled, loaded ' +
       'onto another vehicle, or sitting in a depot/warehouse yard as freight.',
     'Not a food bank or charity handout line — Fresh-CAN is a paid, autonomous retail store, not free food ' +
@@ -102,39 +104,37 @@ export const BRAND_PROFILE: BrandProfile = {
   unit: {
     // Minimum recognisable descriptor — background/incidental appearances only.
     identity:
-      'A white box truck with a deep maroon (#6B1A1A) steel cargo container mounted on back. The white "Fresh ' +
-      '[maple leaf icon] CAN" wordmark appears once, centered, on each side panel — nowhere else on the ' +
-      'vehicle.',
+      'A standalone deep maroon (#6B1A1A) corrugated steel shipping container resting on the ground, with no ' +
+      'truck, cab or wheels. The white "Fresh [maple leaf icon] CAN" wordmark appears once on each long side ' +
+      'panel — nowhere else on the container.',
 
     // Complete structural rule set — used when the unit is a featured subject.
     // Every face named explicitly (front/side/rear), not left to an implied
     // "nowhere else" — see docs/PROMPT_ARCHITECTURE.md for why that
     // specificity matters here.
     full:
-      'The Fresh-CAN mobile grocery store: a white box truck with a deep maroon (#6B1A1A) steel cargo container ' +
-      'mounted on back. The cab is plain white and unbranded; all branding is on the container only. The ' +
-      'white "Fresh [maple leaf icon] CAN" wordmark, never distorted, appears once, centered, on each of ' +
-      'the two side panels — nowhere else on the vehicle. The front face (where it meets the cab) and the ' +
-      'rear face are both plain maroon with no wordmark; the rear face carries only one small white square QR ' +
-      'panel beside the door. The front face and both side panels are ' +
-      "solid, unbroken maroon steel; the rear face holds the vehicle's only opening — a black-frame glass " +
-      'double door flush at bumper height, reached straight from the ground — which is the only entrance and ' +
-      'the only place customers are ever served.',
+      'The Fresh-CAN mobile grocery store: a standalone deep maroon (#6B1A1A) corrugated steel shipping ' +
+      'container resting on the ground, with no truck, cab, wheels, trailer or chassis. It has two long side ' +
+      'panels and two end faces. The white "Fresh [maple leaf icon] CAN" wordmark, never distorted, appears ' +
+      'once on each of the two long side panels — nowhere else on the container. Both long side panels are ' +
+      'solid, unbroken corrugated maroon steel. One end face is plain solid maroon with no wordmark. The other ' +
+      "end face holds the container's only opening — a black-frame glass double door flush at ground level, " +
+      'reached straight from the ground, with one small white square QR panel beside it — which is the only ' +
+      'entrance and the only place customers are ever served.',
 
-    // Same rules as `full`, said once each (job d289e3af: `full` plus the
-    // reference photo's description repeated the wordmark and door rules).
+    // Same rules as `full`, said once each.
     sceneCompact:
-      'The Fresh-CAN mobile grocery store: a white box truck with a deep maroon (#6B1A1A) steel cargo container ' +
-      'mounted on back; the cab is plain white and unbranded. The white "Fresh [maple leaf icon] CAN" wordmark, ' +
-      'never distorted, appears once, centered, on each of the two side panels and nowhere else. The front face ' +
-      'and both side panels are solid, unbroken maroon steel with no opening; the rear face holds the only ' +
-      'opening, a black-frame glass double door flush at bumper height, plus one small white square QR panel ' +
+      'The Fresh-CAN mobile grocery store: a standalone deep maroon (#6B1A1A) corrugated steel shipping ' +
+      'container on the ground — no truck, cab or wheels. The white "Fresh [maple leaf icon] CAN" wordmark, ' +
+      'never distorted, appears once on each long side panel and nowhere else. Both long side panels are ' +
+      'solid, unbroken maroon steel with no opening; one end face is plain maroon; the other end face holds ' +
+      'the only opening, a black-frame glass double door at ground level, plus one small white square QR panel ' +
       'beside it and no wordmark. That door is the only entrance and the only place customers are served. ' +
-      'Never place the wordmark or logo on any other vehicle or object.',
+      'Never place the wordmark or logo on any other object.',
 
     proportions:
-      'The container is long and low, roughly twice as long as it is tall — never a cube or a tall box — and ' +
-      'the white cab and the wheels are always visible.',
+      'The container is long and low, roughly twice as long as it is tall — never a cube or a tall box — ' +
+      'and it rests directly on the ground with no truck, cab or wheels anywhere.',
 
     interior:
       'The interior of the Fresh-CAN mobile grocery store: a narrow aisle inside the shipping container ' +
@@ -150,13 +150,13 @@ export const BRAND_PROFILE: BrandProfile = {
   },
 
   forbiddenOnUnit: [
-    'No door, hatch, service window, vent, or fixture of any kind on the front face or either side — the ' +
-      'rear glass double door is the only entrance and only opening, on any face.',
-    'No wordmark, logo or signage on the front or rear faces — the wordmark appears exactly once ' +
-      'per side panel, nowhere else on the vehicle. The only addition allowed is the one small white square QR ' +
-      'panel on the rear face beside the door.',
-    'No other text, graphics, decals, stripes, URLs, or QR panels anywhere on the unit (the single rear-face QR panel excepted).',
-    'The cab is plain white and completely unbranded.',
+    'No door, hatch, service window, vent, or fixture of any kind on either long side or the plain end — the ' +
+      'glass double door on the one door end is the only entrance and only opening.',
+    'No wordmark, logo or signage on either end face — the wordmark appears exactly once ' +
+      'per long side panel, nowhere else on the container. The only addition allowed is the one small white ' +
+      'square QR panel on the door end beside the door.',
+    'No other text, graphics, decals, stripes, URLs, or QR panels anywhere on the unit (the single door-end QR panel excepted).',
+    'No truck, cab, wheels, trailer, chassis or vehicle of any kind — the container rests directly on the ground.',
     'Colour and structure identical in every appearance — always this exact maroon (#6B1A1A), wordmark never ' +
       'distorted.',
     'Never place the Fresh-CAN wordmark or logo on any other vehicle, sign, storefront, building, or object.',
@@ -176,8 +176,8 @@ export const BRAND_PROFILE: BrandProfile = {
     'no captions, no titles, no logos, no watermarks, no typography anywhere in the image — pure photography only.',
 
   noNewTextInstruction:
-    'Photorealistic. Keep the vehicle\'s real signage/logo exactly as shown in the reference photo, unaltered. ' +
-    "The only lettering in frame is the vehicle's own signage; packaging, labels, and shopping bags have " +
+    'Photorealistic. Keep the container\'s real signage/logo exactly as shown in the reference photo, unaltered. ' +
+    "The only lettering in frame is the container's own signage; packaging, labels, and shopping bags have " +
     'blank fronts — pure photography only.',
 
   ctaBarText: 'Visit fresh-can.com',
@@ -188,7 +188,7 @@ export const BRAND_PROFILE: BrandProfile = {
   typographyDescriptor:
     'Manrope or a very similar clean, modern, geometric sans-serif typeface — bold weight for the headline, ' +
     'semi-bold weight for the subtitle, never cursive, never script, never a serif font.',
-  // Maroon sampled from the real truck container photos in assets/fresh-can/
+  // Maroon sampled from the real container photos in assets/fresh-can/
   // (~#6B1A1A) — swap the hex here if the official guideline value differs.
   // The image clause is what scene-image prompts carry; the video clause is
   // deliberately short (sceneVideo has a tight character budget).
@@ -224,46 +224,23 @@ export const BRAND_PROFILE: BrandProfile = {
   },
 
   // Uploaded to the public brand-assets Supabase bucket from
-  // assets/fresh-can/. One is picked per image (hero/inline/photo pick
-  // independently) — `whatItShows` must accurately describe what that
-  // specific photo shows, since the image adapter edits from it; `disregard`
-  // lists every real-but-non-canonical element that specific photo shows, so
-  // nothing is left for the model to notice and try to faithfully reproduce.
-  // The side profile is listed FIRST because composeCharacterRefPrompt always
-  // uses referenceImages.exterior[0]. These three are retouched (2026-10-10)
-  // so nothing real-but-non-canonical remains in frame: no extra wordmarks,
-  // QR panel, URL text, vents or graphic wave, and no door anywhere but the
-  // rear — hence empty `disregard`. Each entry carries its `view`; video
-  // scenes pick by the planner's `unit_view` (compose.ts pickExteriorByView).
-  // Both rear photos (_clean_2) show the single entry QR panel beside the door.
+  // assets/fresh-can/. One is picked per image — `whatItShows` must
+  // accurately describe what that specific photo shows, since the image
+  // adapter edits from it; `disregard` lists every real-but-non-canonical
+  // element it shows. The exterior is ONE container-only photo used as an
+  // identity anchor: scenes may frame the container from any angle, so the
+  // structure rules in `unit.full` (which faces carry what) cover the sides
+  // this photo does not show.
   referenceImages: {
     exterior: [
       {
-        view: 'side',
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_side_clean.png',
+        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/container.png',
         whatItShows:
-          'Camera positioned directly to the side of the truck, a full profile view of the whole container ' +
-          'and the white cab: both side panels are one solid, unbroken corrugated maroon wall carrying a ' +
-          'single "Fresh CAN" wordmark — reproduce that exact wordmark faithfully, once.',
-        disregard: [],
-      },
-      {
-        view: 'rear34',
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_rear34_clean_2.png',
-        whatItShows:
-          'Camera positioned behind and to the side of the truck, a rear three-quarter view: the glass double ' +
-          'door and one small white square QR panel to its right are on the rear face only (the rear face ' +
-          'carries no wordmark), while the long side panel stays solid maroon with a single "Fresh CAN" ' +
-          'wordmark and no opening of any kind.',
-        disregard: [],
-      },
-      {
-        view: 'rear',
-        url: 'https://jbrktjnscnzmhwupojiu.supabase.co/storage/v1/object/public/brand-assets/truck_exterior_rear_clean_2.png',
-        whatItShows:
-          'Camera positioned directly behind the truck, straight-on, facing the rear entrance: a black-frame ' +
-          'glass double door, plain unbranded maroon on either side of it, and one small white square QR panel ' +
-          'on the rear face to the right of the door (as seen from behind) — reproduce that single panel once.',
+          'A standalone maroon shipping container resting on the ground, seen from a front three-quarter ' +
+          'angle: the end face with the black-frame glass double door and one small white square QR panel ' +
+          'beside it, and the long side panel as one solid, unbroken corrugated maroon wall carrying a ' +
+          'single "Fresh CAN" wordmark — reproduce that exact wordmark faithfully, once. There is no truck, ' +
+          'cab or wheels. Use it only for the container\'s design, never its angle, background or lighting.',
         disregard: [],
       },
     ],
