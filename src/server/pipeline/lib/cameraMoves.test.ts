@@ -2,9 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { cameraMovesEnabled, mentionsCameraMove } from './cameraMoves'
 import { lintClipMotion } from './clipMotion'
 import { composeSceneVideoPrompt, composeVideoScriptSystemPrompt, BRAND_PROFILE } from '../prompts/index'
-import { CLIP_MOTION_SYSTEM_PROMPT, CLIP_MOTION_SYSTEM_PROMPT_MOVING, OpenAIClipMotionWriter, buildImageValidationSystemPrompt, REFERENCE_MATCH_ISSUE } from '../adapters/openai'
+import { CLIP_MOTION_SYSTEM_PROMPT, CLIP_MOTION_SYSTEM_PROMPT_MOVING, OpenAIClipMotionWriter, buildImageValidationSystemPrompt, REFERENCE_MATCH_ISSUE, POSED_PEOPLE_ISSUE } from '../adapters/openai'
 import { lockSceneCamera } from '../steps/video/generateScript'
-import { buildCorrectionInstruction, isReferenceMismatchIssue, referenceUrlsForValidation } from '../steps/video/generateSceneVisual'
+import { buildCorrectionInstruction, isReferenceMismatchIssue, isPosedPeopleIssue, referenceUrlsForValidation } from '../steps/video/generateSceneVisual'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -98,5 +98,27 @@ describe('reference-compared still check', () => {
     expect(referenceUrlsForValidation({ unit_presence: 'background', setting: 'interior' })).toEqual(BRAND_PROFILE.referenceImages.interior.map((r) => r.url))
     expect(isReferenceMismatchIssue(REFERENCE_MATCH_ISSUE)).toBe(true)
     expect(buildCorrectionInstruction([REFERENCE_MATCH_ISSUE])).toMatch(/Match the real reference design exactly/)
+  })
+})
+
+
+describe('purposeful action instead of posing', () => {
+  it('planner asks for mid-action people and at most one to-camera scene', () => {
+    const p = composeVideoScriptSystemPrompt(BRAND_PROFILE, { category: 'c', scriptType: 'SOLUTION', targetDurationSeconds: 36, sceneNotes: 'idea' })
+    expect(p).toContain('caught IN THE MIDDLE of a purposeful action')
+    expect(p).toContain('at most one scene of the whole video may have a person looking straight into the lens')
+  })
+  it('both motion-writer prompts ask for purposeful task actions, not posing or smiling at the camera', () => {
+    for (const p of [CLIP_MOTION_SYSTEM_PROMPT, CLIP_MOTION_SYSTEM_PROMPT_MOVING]) {
+      expect(p).toContain('purposeful actions')
+      expect(p).toContain('never idle posing')
+      expect(p).not.toContain('a head turn, a step, a breath, a smile)')
+    }
+  })
+  it('the still check blocks only an all-people-idle, all-looking-at-lens image and retries with a positive instruction', () => {
+    expect(buildImageValidationSystemPrompt('none')).toContain(POSED_PEOPLE_ISSUE)
+    expect(buildImageValidationSystemPrompt('none')).toContain('is NOT a defect')
+    expect(isPosedPeopleIssue(POSED_PEOPLE_ISSUE)).toBe(true)
+    expect(buildCorrectionInstruction([POSED_PEOPLE_ISSUE])).toMatch(/mid-action/)
   })
 })

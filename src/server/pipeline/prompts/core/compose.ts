@@ -510,6 +510,14 @@ const GENERIC_DOCUMENTARY_HINT =
 // separate constant (this file's own consolidation history above already
 // found that fragmenting these into many small constants diluted the
 // scene-specific instruction).
+// Candid, active people: the planner asks for it in the scene text; this
+// restates it for the image model, which otherwise defaults to people
+// standing still and facing the lens.
+// Kept very short on purpose: the scene text must stay a meaningful share of the
+// prompt (see the "meaningful share" regression test).
+const ACTIVE_PEOPLE_RULE = 'People are mid-action, hands busy, eyes on the task; nobody poses at the lens.'
+const ACTIVE_PEOPLE_RULE_COMPACT = ACTIVE_PEOPLE_RULE
+
 const SCENE_CONTENTS_RULE =
   'Show only the people, objects, and setting this scene describes or clearly implies, in a physically ' +
   'plausible and safe setting (never, e.g., people eating in the middle of a road). Every visible hand ' +
@@ -1118,6 +1126,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
+    compact ? ACTIVE_PEOPLE_RULE_COMPACT : ACTIVE_PEOPLE_RULE,
     qualityFloor,
     aspectFramingClause(job.aspectRatio),
     appClause,
@@ -1234,6 +1243,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     look,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
+    compact ? ACTIVE_PEOPLE_RULE_COMPACT : ACTIVE_PEOPLE_RULE,
     qualityFloor,
     aspectFramingClause(job.aspectRatio),
     creativeBrief,

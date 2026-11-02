@@ -283,6 +283,11 @@ export function referenceUrlsForValidation(l2: { unit_presence?: string; setting
   return urls.length > 0 ? urls : undefined
 }
 
+/** The validator's "people posed at the camera instead of doing the scene" finding. */
+export function isPosedPeopleIssue(issue: string): boolean {
+  return /posed at the camera/i.test(issue)
+}
+
 /** The validator's "does not match the real container/interior reference" finding. */
 export function isReferenceMismatchIssue(issue: string): boolean {
   return /real container\/interior reference/i.test(issue)
@@ -340,6 +345,12 @@ export function buildCorrectionInstruction(issues: string[]): string {
   }
   if (issues.some(isThirdPartyBrandIssue)) {
     return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
+  }
+  if (issues.some(isPosedPeopleIssue)) {
+    return (
+      'Show the people caught mid-action in a natural candid moment: their hands busy with what the scene ' +
+      'describes and their eyes on the task or on each other, not posing or looking into the camera.'
+    )
   }
   if (issues.some(isReferenceMismatchIssue)) {
     return (
@@ -592,7 +603,7 @@ async function runSceneImageStep(
 
       // Only queried on a rejection — the common (passing) path costs no
       // extra DB round-trip.
-      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isReferenceMismatchIssue(i))
+      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isReferenceMismatchIssue(i) || isPosedPeopleIssue(i))
       const validationRetriesUsed = validation.pass
         ? 0
         : await countFailedStepAttemptsWithPrefix(

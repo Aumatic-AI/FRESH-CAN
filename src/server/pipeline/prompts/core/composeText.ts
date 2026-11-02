@@ -104,6 +104,16 @@ export const NO_ENTRY_EXIT_NARRATION_RULE =
  * models cannot hold small lettering, so labels and bags are told to carry
  * none (jobs e4a83ec0, 5d2dd9a2).
  */
+// People are caught doing things, not posing. Added after a real video where
+// most stills had the couple standing still and facing the lens.
+export const ACTIVE_PEOPLE_PLANNER_RULE =
+  'Every person is caught IN THE MIDDLE of a purposeful action tied to this scene — hands busy with the task ' +
+  '(reading a list, opening the app, choosing produce, carrying a bag, plating food, setting a table, ' +
+  'pouring, stirring, walking on) and their attention on what they are doing or on each other, in a natural, ' +
+  'candid moment. Nobody stands still facing the camera, and at most one scene of the whole video may have a ' +
+  'person looking straight into the lens, only if that beat truly calls for it. Show the action part-way through ' +
+  '(before it is finished), and give neighbouring scenes different actions rather than repeating one gesture'
+
 export const SCENE_VISUAL_FIDELITY_RULE =
   'Every person in a scene\'s cast_present must be clearly visible on screen in that scene\'s ' +
   'visual_description — never swap them for unnamed extras, and never reduce them to hands or a first-person ' +
@@ -771,7 +781,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'ambient motion already implied by the setting, e.g. wind moving leaves or fabric, light ' +
     'shifting — specific enough to generate an image from. Ground it in this scene\'s own story beat and ' +
     'purpose from your planning above: what specifically happens, in what environment, and how it connects to ' +
-    'the scene immediately before it — never a generic or purposeless shot),\n' +
+    'the scene immediately before it — never a generic or purposeless shot. ' + ACTIVE_PEOPLE_PLANNER_RULE + '),\n' +
     '      "shot_notes": string (cinematographic direction for this exact shot: angle, framing, distance and depth ' +
     'of field. ' + shotNotesCamera + ' Choose the angle and framing that serve THIS scene\'s specific ' +
     'purpose in the story, not decoration for its own sake),\n' +

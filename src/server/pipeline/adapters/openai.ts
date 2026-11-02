@@ -125,6 +125,17 @@ const IMAGE_VALIDATION_SYSTEM_PROMPT =
   'Use "blocking" only for a defect that would make the image unusable in a professional ad; use "high" ' +
   'confidence only when the defect is unambiguous, not merely possible.'
 
+// Always on. Narrow on purpose (every rejection is a paid regeneration): only
+// an image where EVERY person is idle and staring into the lens although the
+// scene describes an action. The retry regenerates from scratch.
+export const POSED_PEOPLE_ISSUE = 'people posed at the camera instead of doing the scene'
+export const POSED_PEOPLE_VALIDATION_CLAUSE =
+  ' ALSO report as blocking, with high confidence, an image in which EVERY visible person is standing or sitting ' +
+  'still and looking straight into the camera with no hand engaged in any action, when the scene description above ' +
+  'describes them doing something (and does not ask for a portrait or direct eye contact). Use the text ' +
+  `"${POSED_PEOPLE_ISSUE}". One person glancing at the camera, or people looking at each other or at what they ` +
+  'are doing, is NOT a defect.'
+
 // Appended only when the unit can appear in the scene (ImageValidationInput.
 // unitPresence). The container's long sides and plain end are solid steel; the model
 // keeps drawing a door/hatch there wherever a scene shows someone entering,
@@ -165,7 +176,7 @@ export function buildImageValidationSystemPrompt(
   unitPresence?: 'none' | 'background' | 'featured',
   hasReferences = false,
 ): string {
-  let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE
+  let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE + POSED_PEOPLE_VALIDATION_CLAUSE
   if (unitPresence === 'background' || unitPresence === 'featured') {
     prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
   }
@@ -350,8 +361,10 @@ export class OpenAIClipValidator implements ClipValidator {
 export const CLIP_MOTION_SYSTEM_PROMPT =
   'You write the motion prompt for an image-to-video model. The model already sees the attached still frame, ' +
   'so describe only what moves, never what the image looks like. Write ONE or TWO plain sentences (under 260 ' +
-  'characters): one or two small, concrete, natural actions of the people or things already visible in the frame ' +
-  '(a gesture, a head turn, a step, a breath, a smile), plus light ambient motion only if the frame already ' +
+  'characters): one or two concrete, purposeful actions that continue what the people already visible are ' +
+  'doing in the scene (reaching, lifting, choosing, carrying, pouring, stirring, writing, tapping the phone, ' +
+  'setting something down, walking on), with their eyes on the task or on each other — never idle posing, ' +
+  'nodding, a head turn or a smile at the camera — plus light ambient motion only if the frame already ' +
   'implies it (a breeze in hair or leaves). Then say everything else holds still. Pace the actions to the clip ' +
   'length. Take the actions from the scene intent and keep their direction exactly as written there (left, right, ' +
   'towards or away from the camera). Mention only people and objects that are visible in the frame. Keep the ' +
@@ -367,8 +380,10 @@ export const CLIP_MOTION_SYSTEM_PROMPT_MOVING =
   'characters): first, at most ONE slow, smooth, motivated camera move that fits the scene intent and shot notes ' +
   '(for example a gentle push-in, a slow pull-back, a slider move past a foreground object, a slow zoom with the ' +
   'camera fixed, a gentle handheld drift, or a short reverse-tracking shot), saying how it starts and ends — or ' +
-  '"static camera" when the moment is best held; then one or two small, concrete, natural actions of the people or ' +
-  'things already visible in the frame (a gesture, a head turn, a step, a breath, a smile), plus light ambient ' +
+  '"static camera" when the moment is best held; then one or two concrete, purposeful actions that continue what ' +
+  'the people already visible are doing in the scene (reaching, lifting, choosing, carrying, pouring, stirring, ' +
+  'writing, tapping the phone, setting something down, walking on), with their eyes on the task or on each ' +
+  'other — never idle posing, nodding, a head turn or a smile at the camera — plus light ambient ' +
   'motion only if the frame already implies it. Keep the subject in the foreground and the background simple and ' +
   'physically consistent with the frame, so nothing repeats, morphs or changes. Never an orbit around a face, a ' +
   'whip pan, a crash zoom, a fly-through of a doorway or a long follow shot. Pace everything to the clip length. ' +

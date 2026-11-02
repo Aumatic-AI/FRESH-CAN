@@ -704,7 +704,8 @@ describe('composeSceneImagePrompt', () => {
       .split(/(?<=\.) /)
       .filter((part) => /student|recipe|rack focus|earthy|Recurring|Visual look/.test(part))
       .join(' ').length
-    expect(sceneSpecific / scene.prompt.length).toBeGreaterThan(0.35)
+    // 0.33 (was 0.35): the one-sentence "people are mid-action" rule was added deliberately; the run this guards against was 9-12%.
+    expect(sceneSpecific / scene.prompt.length).toBeGreaterThan(0.33)
   })
 
   it('includes shot notes and regen instructions when given', () => {
@@ -1724,5 +1725,14 @@ describe('Part A: reference is identity only, scene is creative', () => {
     const none = composeSceneImagePrompt(BRAND_PROFILE, { ...job, unitPresence: 'none' }).prompt
     expect(none).not.toContain('Framing for this scene')
     expect(none).toContain('Surroundings: light snow, late afternoon.')
+  })
+})
+
+
+describe('active, candid people', () => {
+  const job = { pipelineId: 'p1', sceneNumber: 2, visualDescription: 'A woman picks herbs', shotNotes: null, characterRefUrl: 'https://example.com/r.jpg', unitPresence: 'none' as const }
+  it('the still prompt tells the model people are mid-action and not posing at the lens, in both variants', () => {
+    expect(composeSceneImagePrompt(BRAND_PROFILE, job).prompt).toContain('People are mid-action, hands busy, eyes on the task; nobody poses at the lens.')
+    expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, compactFixedText: true }).prompt).toContain('mid-action')
   })
 })
