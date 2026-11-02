@@ -20,8 +20,8 @@ export const PROMPT_LIMITS = {
    *  legs, cropped people and a wrong truck. The cascade in
    *  composeSceneImagePrompt still applies if a prompt ever exceeds this. */
   sceneImage: 8000,
-  /** KieVideoGenerator — Seedance 2.0 mini. Documented at
-   *  docs.kie.ai/market/bytedance/seedance-2-mini: `input.prompt` is
+  /** KieVideoGenerator — Seedance 2.0. Documented at
+   *  docs.kie.ai/market/bytedance/seedance-2: `input.prompt` is
    *  3-20000 characters; kept at the old 1.5 Pro ~2500 cap as a conservative ceiling. */
   sceneVideo: 2450,
 } as const

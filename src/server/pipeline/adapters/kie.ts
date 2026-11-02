@@ -234,9 +234,9 @@ export class KieSceneImageGenerator implements ImageGenerator {
 }
 
 /**
- * KIE.ai scene video-clip generation — Bytedance Seedance 2.0 mini
- * (`bytedance/seedance-2-mini`, upgraded from 1.5 Pro; docs.kie.ai/market/
- * bytedance/seedance-2-mini: frame is `first_frame_url` not `input_urls`, no
+ * KIE.ai scene video-clip generation — Bytedance Seedance 2.0
+ * (`bytedance/seedance-2`, upgraded from 1.5 Pro; docs.kie.ai/market/
+ * bytedance/seedance-2: frame is `first_frame_url` not `input_urls`, no
  * `fixed_lens`, 480p/720p, duration 4-15) image-to-video, the production model, via the unified Market job
  * endpoints (POST /api/v1/jobs/createTask, GET /api/v1/jobs/recordInfo),
  * verified against docs.kie.ai/market/bytedance/seedance-1-5-pro on
@@ -319,7 +319,7 @@ export class KieVideoGenerator implements VideoGenerator {
         Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'bytedance/seedance-2-mini',
+        model: 'bytedance/seedance-2',
         input: {
           prompt: input.prompt,
           first_frame_url: input.referenceImageUrl,
@@ -331,7 +331,7 @@ export class KieVideoGenerator implements VideoGenerator {
           // (avMerger.ts) — this call never carries the language-specific
           // narration, so no ambient/audio track is requested here either.
           generate_audio: false,
-          // Seedance 2.0 mini has no `fixed_lens` input (1.5 Pro did); camera
+          // Seedance 2.0 has no `fixed_lens` input (1.5 Pro did); camera
           // stillness now relies on the planner's static-shot prompts alone.
           duration: input.durationSeconds,
         },
