@@ -136,6 +136,23 @@ export const POSED_PEOPLE_VALIDATION_CLAUSE =
   `"${POSED_PEOPLE_ISSUE}". One person glancing at the camera, or people looking at each other or at what they ` +
   'are doing, is NOT a defect.'
 
+// Always on. Narrow on purpose (a rejection is a paid regeneration): only clearly skimpy or revealing
+// clothing. Ordinary casual wear (jeans, a tee, a sweatshirt, a knee-length skirt) is never a defect.
+export const DRESS_ISSUE = 'person not modestly dressed'
+export const DRESS_VALIDATION_CLAUSE =
+  ' ALSO report as blocking, with high confidence, any visible person in clearly skimpy or revealing clothing ' +
+  '(swimwear, lingerie, a crop top or bare midriff, a low neckline showing cleavage, very short shorts or skirt, ' +
+  `tight or see-through clothing). Use the text "${DRESS_ISSUE}". Ordinary casual everyday clothes are NOT a defect.`
+
+// Appended with the reference photos. The references are a design guide: an image that reproduces one of
+// them (same camera angle AND same background) is a copy, not a new photograph. A paid regeneration, so
+// only an unmistakable copy counts.
+export const REFERENCE_COPY_ISSUE = 'copies the reference photo instead of a new composition'
+export const REFERENCE_COPY_VALIDATION_CLAUSE =
+  ' ALSO report as blocking, with high confidence, an image that is a near-identical copy of one of the ' +
+  'reference photos: the same camera angle AND the same background (the same buildings, trees and paving). ' +
+  `Use the text "${REFERENCE_COPY_ISSUE}". The same container design in a different view or place is NOT a copy.`
+
 // Appended only when the unit can appear in the scene (ImageValidationInput.
 // unitPresence). The container's long sides and plain end are solid steel; the model
 // keeps drawing a door/hatch there wherever a scene shows someone entering,
@@ -176,11 +193,11 @@ export function buildImageValidationSystemPrompt(
   unitPresence?: 'none' | 'background' | 'featured',
   hasReferences = false,
 ): string {
-  let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE + POSED_PEOPLE_VALIDATION_CLAUSE
+  let prompt = IMAGE_VALIDATION_SYSTEM_PROMPT + THIRD_PARTY_BRAND_VALIDATION_CLAUSE + POSED_PEOPLE_VALIDATION_CLAUSE + DRESS_VALIDATION_CLAUSE
   if (unitPresence === 'background' || unitPresence === 'featured') {
     prompt += UNIT_STRUCTURE_VALIDATION_CLAUSE
   }
-  if (hasReferences) prompt += REFERENCE_MATCH_VALIDATION_CLAUSE
+  if (hasReferences) prompt += REFERENCE_MATCH_VALIDATION_CLAUSE + REFERENCE_COPY_VALIDATION_CLAUSE
   return prompt
 }
 

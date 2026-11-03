@@ -278,9 +278,19 @@ export function isUnitDoorIssue(issue: string): boolean {
  *  the unit is not in the scene. */
 export function referenceUrlsForValidation(l2: { unit_presence?: string; setting?: string }): string[] | undefined {
   if ((l2.unit_presence ?? 'none') === 'none') return undefined
-  const pool = l2.setting === 'interior' ? BRAND_PROFILE.referenceImages.interior : BRAND_PROFILE.referenceImages.exterior.slice(0, 1)
+  const pool = l2.setting === 'interior' ? BRAND_PROFILE.referenceImages.interior : BRAND_PROFILE.referenceImages.exterior
   const urls = pool.map((r) => r.url)
   return urls.length > 0 ? urls : undefined
+}
+
+/** The validator's "copies the reference photo" finding (adapters/openai.ts REFERENCE_COPY_ISSUE). */
+export function isReferenceCopyIssue(issue: string): boolean {
+  return /copies the reference photo|near-identical copy/i.test(issue)
+}
+
+/** The validator's "person not modestly dressed" finding (adapters/openai.ts DRESS_ISSUE). */
+export function isDressIssue(issue: string): boolean {
+  return /not modestly dressed|skimpy|revealing/i.test(issue)
 }
 
 /** The validator's "people posed at the camera instead of doing the scene" finding. */
@@ -345,6 +355,12 @@ export function buildCorrectionInstruction(issues: string[]): string {
   }
   if (issues.some(isThirdPartyBrandIssue)) {
     return 'All packaging, labels, clothing and signs are plain with no readable brand names or logos other than Fresh-CAN.'
+  }
+  if (issues.some(isReferenceCopyIssue)) {
+    return 'Create a NEW composition: a different camera position, different surroundings and different light than the reference photos, keeping only the container\'s design.'
+  }
+  if (issues.some(isDressIssue)) {
+    return 'Dress every person fully and modestly in ordinary everyday clothes: shoulders, chest and midriff covered, hems at or below the knee, nothing tight or revealing.'
   }
   if (issues.some(isPosedPeopleIssue)) {
     return (
@@ -603,7 +619,7 @@ async function runSceneImageStep(
 
       // Only queried on a rejection — the common (passing) path costs no
       // extra DB round-trip.
-      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isReferenceMismatchIssue(i) || isPosedPeopleIssue(i))
+      const needsScratchRegen = validation.issues.some((i) => isCollageIssue(i) || isUnitDoorIssue(i) || isThirdPartyBrandIssue(i) || isReferenceMismatchIssue(i) || isPosedPeopleIssue(i) || isDressIssue(i) || isReferenceCopyIssue(i))
       const validationRetriesUsed = validation.pass
         ? 0
         : await countFailedStepAttemptsWithPrefix(

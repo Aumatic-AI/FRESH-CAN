@@ -84,3 +84,29 @@ describe('several container references: dynamic scenes, never a copy of a photo'
     expect(out.prompt).toMatch(/do not reuse either photo's angle, framing, background or people/)
   })
 })
+
+describe('the container is a new picture made from the references, never a copy', () => {
+  const job = { pipelineId: 'vid-copy', visualDescription: 'A man holds his phone beside the container', shotNotes: null, characterRefUrl: 'https://example.com/ref.png', unitPresence: 'featured' as const }
+  it('when the plan names no surroundings, code picks one per scene (stable, varied, never the reference backdrop)', async () => {
+    const { pickContainerSurroundings } = await import('./containerCamera')
+    const outs = Array.from({ length: 10 }, (_, i) => composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: i + 1 }))
+    const places = new Set(outs.map((o) => /Surroundings: (.+?)\./.exec(o.prompt)?.[1]))
+    expect(places.size).toBeGreaterThan(3)
+    expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: 4 }).prompt).toBe(outs[3].prompt)
+    for (let i = 0; i < 30; i++) expect(pickContainerSurroundings(`v${i}`, i)).not.toMatch(/glass|office|plaza|skyline|[A-Z][a-z]+ Street/)
+    // a planner-supplied setting still wins
+    expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: 2, sceneEnvironment: 'a snowy lane' } as never).prompt).toMatch(/Surroundings: a snowy lane\./)
+  })
+  it('the prompt forbids the reference\'s trees, buildings and paving as well as its angle', () => {
+    expect(composeSceneImagePrompt(BRAND_PROFILE, { ...job, sceneNumber: 1 }).prompt).toMatch(/never its trees, buildings or paving/)
+  })
+  it('the validator sees every container photo and rejects a near-copy with a regeneration instruction', async () => {
+    const { buildImageValidationSystemPrompt, REFERENCE_COPY_ISSUE } = await import('../../adapters/openai')
+    const { isReferenceCopyIssue, buildCorrectionInstruction, referenceUrlsForValidation } = await import('../../steps/video/generateSceneVisual')
+    expect(buildImageValidationSystemPrompt('featured', true)).toContain(REFERENCE_COPY_ISSUE)
+    expect(buildImageValidationSystemPrompt('featured', false)).not.toContain(REFERENCE_COPY_ISSUE)
+    expect(isReferenceCopyIssue(REFERENCE_COPY_ISSUE)).toBe(true)
+    expect(buildCorrectionInstruction([REFERENCE_COPY_ISSUE])).toMatch(/NEW composition/)
+    expect(referenceUrlsForValidation({ unit_presence: 'featured', setting: 'exterior' })).toHaveLength(4)
+  })
+})

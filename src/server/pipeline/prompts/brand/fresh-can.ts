@@ -39,6 +39,10 @@ export const BRAND_PROFILE: BrandProfile = {
     'Vancouver, Ontario) — "Canada" is the only place name to use. Leave the reader feeling hopeful, not ' +
     'lectured.',
 
+  // Everyday, family-friendly dress for every person in every image (see core/compose.ts and
+  // the image validator): fully covered, nothing revealing.
+  dressRule: 'Everyone is modestly dressed in fully covering everyday clothes.',
+
   narrationTells: [
     'hearts sink',
     'heart sinks',

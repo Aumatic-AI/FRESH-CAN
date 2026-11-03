@@ -16,7 +16,7 @@ import type {
 } from '../types'
 import { pickDeterministic } from './rotation'
 import { cameraMovesEnabled } from '../../lib/cameraMoves'
-import { pickContainerCamera, type ContainerFaceKey } from './containerCamera'
+import { pickContainerCamera, pickContainerSurroundings, type ContainerFaceKey } from './containerCamera'
 import { SAFE_ZONE_RADIUS_FRACTION } from '../../lib/watermarkGeometry'
 import { PROMPT_LIMITS } from './limits'
 import { assertNoContradiction } from './contradictions'
@@ -385,7 +385,7 @@ const REFERENCE_IS_GUIDE_EXTERIOR =
   'Images 1 and 2 show the same container from two different viewpoints: use them only as a guide for the ' +
   "container's design (shape, structure, colour, wordmark and door placement) — never as a literal photo to " +
   "copy. This is a NEW photograph from the camera position given below: do not reuse either photo's angle, " +
-  'framing, background or people.'
+  'framing, background or people, and never its trees, buildings or paving.'
 
 const REFERENCE_IS_GUIDE_EXTERIOR_COMPACT =
   'Images 1 and 2 show the same container from two viewpoints: a design guide only. Build a new photograph from ' +
@@ -709,6 +709,7 @@ function composeBlogImage(
   }
 
   parts.push(watermarkSafeZoneBlock())
+  if (brand.dressRule) parts.push(brand.dressRule)
   parts.push(textLayerFor(brand, job, referenceImageUrl, noTextVariantFor(brand, presence)))
 
   const prompt = parts.join(' ')
@@ -827,6 +828,7 @@ export function composeCastRefPrompt(brand: BrandProfile, person: CastBibleEntry
     field(person.distinguishing_details),
   ].filter(Boolean)
   const parts = [
+    brand.dressRule ?? '',
     'A plain full-body reference photograph of one real person standing naturally and facing the camera, ' +
       'in soft, even daylight against a plain light-grey background, the whole body in frame from head to shoes, ' +
       'arms relaxed with both hands visible.',
@@ -1166,7 +1168,11 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
       : showSubject && freshField(job.unitFraming)
         ? `Framing for this scene: ${freshField(job.unitFraming)}.`
         : '',
-    freshField(job.sceneEnvironment) ? `Surroundings: ${freshField(job.sceneEnvironment)}.` : '',
+    freshField(job.sceneEnvironment)
+      ? `Surroundings: ${freshField(job.sceneEnvironment)}.`
+      : exteriorCamera
+        ? `Surroundings: ${pickContainerSurroundings(job.pipelineId, job.sceneNumber)}.`
+        : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -1177,6 +1183,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
     compact ? ACTIVE_PEOPLE_RULE_COMPACT : ACTIVE_PEOPLE_RULE,
+    brand.dressRule ?? '',
     qualityFloor,
     aspectFramingClause(job.aspectRatio),
     appClause,
@@ -1294,6 +1301,7 @@ export function composeSceneImagePrompt(brand: BrandProfile, job: SceneImageJob)
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     contentsRule,
     compact ? ACTIVE_PEOPLE_RULE_COMPACT : ACTIVE_PEOPLE_RULE,
+    brand.dressRule ?? '',
     qualityFloor,
     aspectFramingClause(job.aspectRatio),
     creativeBrief,
@@ -1693,6 +1701,7 @@ export function composePhotoPrompt(brand: BrandProfile, job: PhotoJob): ImageCom
     parts.push(unitBrandingBlock(brand, 'none'))
   }
   parts.push(watermarkSafeZoneBlock())
+  if (brand.dressRule) parts.push(brand.dressRule)
   parts.push(textLayerFor(brand, job, referenceImageUrl, noTextVariantFor(brand, presence)))
 
   const prompt = parts.filter(Boolean).join(' ')

@@ -828,7 +828,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '"medium" alone, and add face shape, facial hair or none, and hair length; real renders drew the same ' +
     'person with a different skin tone and face each scene when this was vague), "wardrobe": string (ONE ' +
     'fixed outfit worn in every scene of the video, naming each garment with its exact color, e.g. "olive-green ' +
-    'zip hoodie, dark-wash jeans, white sneakers" — never just "a hoodie", never a change of outfit), ' +
+    'zip hoodie, dark-wash jeans, white sneakers" — never just "a hoodie", never a change of outfit' +
+    (brand.dressRule ? `; ${brand.dressRule}` : '') + '), ' +
     '"distinguishing_details": string } ] (one entry per named or recurring person in the story — locked ' +
     'physical descriptions to reuse VERBATIM in every scene that person appears in, the backbone of keeping ' +
     'them looking the same scene to scene; omit entirely for a video with no recurring named people),\n' +

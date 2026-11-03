@@ -43,3 +43,21 @@ export function pickContainerCamera(
   if (opts.withDistance !== false) parts.push(DISTANCES[(Math.floor(base / 13) + sceneNumber) % DISTANCES.length])
   return `${parts.join(', ')}`
 }
+
+// A code-chosen setting for the container, used when the plan names none. The reference photos all
+// show the same glass office buildings, trees and paved plaza, and a model that is not told otherwise
+// copies them. Generic Canadian places only: no city, sign, skyline or readable text.
+const SURROUNDINGS: readonly string[] = [
+  'a quiet residential street with detached houses and mature trees',
+  'the edge of a small neighbourhood park, with grass and a footpath',
+  'a corner of a community centre car park with a low hedge',
+  'a tree-lined sidewalk beside low-rise brick apartment buildings',
+  'a gravel and paving-stone courtyard between townhouses',
+  'a grassy verge beside a footpath and a row of young trees',
+  'an open paved lot with a low wooden fence and bushes',
+]
+
+/** One phrase naming where the container stands (random but stable per scene). */
+export function pickContainerSurroundings(seed: string, sceneNumber = 0): string {
+  return SURROUNDINGS[(hash(`${seed}:setting`) + sceneNumber * 3) % SURROUNDINGS.length]
+}

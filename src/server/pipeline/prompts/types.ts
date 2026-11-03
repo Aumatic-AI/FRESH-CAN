@@ -294,6 +294,8 @@ export interface BrandProfile {
   voiceGuidelines: string
   /** Overused AI-marketing-copy phrases to steer generated text away from. */
   bannedWords: readonly string[]
+  /** How every person in an image must be dressed (rule G4: brand wording lives in the brand file). Sent with every scene and portrait prompt and to the planner's wardrobe field, and checked by the image validator. */
+  dressRule?: string
   /** Stock phrases that make spoken narration sound machine-written (clichés,
    *  slogan-like closers). Plain lowercase phrases; sent to the narration
    *  prompt and enforced by lib/narrationStyle.ts. */

@@ -94,7 +94,7 @@ describe('reference-compared still check', () => {
   })
   it('picks the right real photos per scene and corrects a mismatch with a positive rule', () => {
     expect(referenceUrlsForValidation({ unit_presence: 'none' })).toBeUndefined()
-    expect(referenceUrlsForValidation({ unit_presence: 'featured', setting: 'exterior' })).toEqual([BRAND_PROFILE.referenceImages.exterior[0].url])
+    expect(referenceUrlsForValidation({ unit_presence: 'featured', setting: 'exterior' })).toEqual(BRAND_PROFILE.referenceImages.exterior.map((r) => r.url))
     expect(referenceUrlsForValidation({ unit_presence: 'background', setting: 'interior' })).toEqual(BRAND_PROFILE.referenceImages.interior.map((r) => r.url))
     expect(isReferenceMismatchIssue(REFERENCE_MATCH_ISSUE)).toBe(true)
     expect(buildCorrectionInstruction([REFERENCE_MATCH_ISSUE])).toMatch(/Match the real reference design exactly/)
