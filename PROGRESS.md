@@ -7,7 +7,7 @@
 | Field | Value |
 |-------|-------|
 | **Project** | Fresh-CAN Content Automation Dashboard |
-| **Last Updated** | 2026-09-24 |
+| **Last Updated** | 2026-11-04 |
 | **Phase** | ✅ Blog + Image + Video Pipeline Migration Complete (all four content types on Inngest, `worker/` fully retired) — 🔄 Prompt architecture refactor in progress (Phase 1/9 done, see Session 12 and `PROMPT_REFACTOR_BRIEF.md`) |
 | **Progress** | ██████████ 95% |
 | **Blockers** | None. `npm run dev` at the repo root is the only thing to start — no separate worker process. |
@@ -2294,3 +2294,19 @@ Audited the 3 real video jobs from 2026-10-08 (790b8771 44.2s, e4a83ec0 39.1s, 5
 ## 2026-11-03 — Dress rule and anti-copy for the container (uncommitted)
 - Latest KIE run (ef32daaa) and the previous one: everyone fully dressed, but no rule existed. Added `BRAND_PROFILE.dressRule` (short, to protect the scene-share test) in scene/cast/photo/blog prompts and the planner's wardrobe field, plus an always-on image-validator check ("person not modestly dressed", blocking, high confidence only) that regenerates with a dress instruction.
 - Container is a guide, not a copy: scenes 3 and 5 of that run mirrored the reference (glass building, trees, paving). Now: code-chosen surroundings when the plan names none (`pickContainerSurroundings`), prompt forbids the reference's trees/buildings/paving, validator sees all four container photos and rejects a near-copy ("copies the reference photo…") with a "NEW composition" regeneration.
+
+## 2026-11-04 — Creative direction: idea is the story, not a single-lead template (uncommitted)
+- Why: every video came out as one person, one small errand, a promo-voice ad (see `docs/CREATIVE_DIRECTION_UPGRADE.md`). Prompt/brand-data changes only; no music, no assembly, no UI, no cast-cap change, default cast ("white Canadians unless the idea says otherwise") untouched.
+- Story engine (`STORY_CRAFT_CLAUSE`): the typed idea IS the story (keep premise, images, order, scale, register; one scene per event it names); craft goes into the telling. New shapes `ensemble`, `many_lives`, `place_transformation`, `contrast_cut`, `ripple_effect` (allow-list in `generateScript.ts`); mode-aware story centre instead of "lead character"; stakes fit the idea; `small_quest` no longer the default. New `story.impact_angle` (personal/family/community/place/manifesto), parsed in `normalizeStory`.
+- Meaning + scale: reads who/barrier/what saved time becomes; place-scale ideas shown across several people and places; cast as many people as the story needs (cast_bible text updated).
+- Voice: no "default to promo". `promo` for product/errand ads; `story` (calm narrator, may address the viewer if creator copy does) for relationship/community/place ideas. Hardship rule: never mock or pity (honest barriers allowed).
+- Creator-written copy: used as the narration (sentences in order, own words, closing line spoken last, own opener such as "Imagine" allowed; ban applies only to invented copy). Narration prompt, review prompt (new check 12) and the style lint's opener check (`localizeScript.ts`) follow this. New REGISTER rule: surreal/poetic/cinematic/documentary ideas or creator copy skip the plain-words/one-image/12-word-hook limits.
+- Mission + stats back on the idea path, gated: the full mission and stats appear only behind "only if story.impact_angle is community, place or manifesto". Food-desert sentence narrowed. Intent step: community/place stories can be `incidental`/`central`; `constraintsFromAdmin` must quote the idea's real constraints, never the Topic/Category/Audience lines.
+- Script Type meaning spelled out in the prompt (SOLUTION / COMMUNITY); `scriptTypeMeaning` tolerates an undefined type.
+- Brand data: `narrationTellsAllowedInStory` (close to home, more room for, togetherness, just in time, plus imagery words: detour, drift, linger, whisper, glimmer, unfold, wander, savour, dappled, golden hour); `story` voice also skips the abstract-noun check. `promo` keeps every ban.
+- Visual craft (planner `(j)`): one distinctive look (light, grade, lens feel, season), varied shot size/angle, depth and motivated light, one hero detail per scene; concrete `look.style_direction`/`palette`. Brand rules unchanged. Image/clip prompt text in `compose.ts` untouched (tests pin phrases; video prompt budget 2450 chars).
+- Not changed (decided): word-band floor (`MIN_FILL` 0.85) for creator copy, no-invented-lines/no-rewording rules, brand-once rule, narration style checks for creator copy.
+- Real runs (OpenAI text only, colour-disappearing idea): v1 one resident, creator copy dropped; latest: 3 people across homes, `story` voice, "Imagine…" opener kept, closing line spoken, but narration still padded/reworded by the word floor. Visual-craft compare: more specific look, varied framings, mixed moves.
+- Tests: updated wording assertions in `composeText.test.ts`, `narrationPromo.test.ts`, `narrationStyle.craft.test.ts`. tsc clean. Full suite: 999 pass, 1 fail — `videoPipeline.e2e.test.ts` "M1: re-running generate_script after success does not call the provider again" (called 2x, expected 1); also fails on the original code with these edits stashed, so it is not from this change.
+- Next: judge on real stills for 2–3 scenes (paid KIE, needs cost OK); decide on the word-floor change for creator copy; commit only when asked.
+- 2026-11-04 add-on: `cast_present` rule now allows generic background people (an unnamed group such as "a few neighbours in the distance": small, away from camera, no cast_bible entry, no close-up, no story action). Anyone in focus, near camera, repeated, or doing something the story needs stays a cast_bible person. Test updated in `composeText.test.ts`; not yet tried on a real crowd scene.

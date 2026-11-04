@@ -322,12 +322,18 @@ export async function writeNarration(
   // for style. Runs last, so its accept test also re-checks the earlier rules.
   const firstScene = [...scenes].sort((a, b) => a.scene_number - b.scene_number)[0]
   const firstBand = firstScene ? narrationWordRange(firstScene.target_duration_ms, wordsPerSecond) : null
+  // The calm "story" voice may use a few phrases and abstract nouns the promo ad voice bans.
+  const storyVoice = opts.spine?.voice === 'story'
+  const storyOk = storyVoice ? BRAND_PROFILE.narrationTellsAllowedInStory ?? [] : []
   const styleOpts = {
-    tells: BRAND_PROFILE.narrationTells,
+    tells: (BRAND_PROFILE.narrationTells ?? []).filter((t) => !storyOk.includes(t)),
     hardFacts: BRAND_PROFILE.narrationHardFacts,
-    openers: BRAND_PROFILE.narrationBannedOpeners,
+    // An opener the creator wrote themselves in their own copy (e.g. "Imagine") is theirs to keep.
+    openers: (BRAND_PROFILE.narrationBannedOpeners ?? []).filter(
+      (o) => !(opts.sceneNotes ?? '').toLowerCase().includes(o.trim()),
+    ),
     closers: BRAND_PROFILE.narrationBannedClosers,
-    abstractNouns: BRAND_PROFILE.narrationAbstractNouns,
+    abstractNouns: storyVoice ? [] : BRAND_PROFILE.narrationAbstractNouns,
     ...(opts.spine?.voice === 'promo' ? { promo: true } : {}),
     vaguePhrases: BRAND_PROFILE.narrationVaguePhrases,
     ...(opts.language === 'English' && opts.recentOpeners ? { recentOpeners: opts.recentOpeners } : {}),

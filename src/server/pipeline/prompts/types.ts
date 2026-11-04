@@ -77,6 +77,8 @@ export interface VideoScriptStory {
   framework?: string
   /** One of HOOK_TYPES (generateScript.ts). */
   hook_type?: string
+  /** One of IMPACT_ANGLES (generateScript.ts): the scale of meaning the story carries. */
+  impact_angle?: string
   /** What the lead character wants and quietly worries about, one line. */
   inner?: string
   /** The recurring object or gesture that carries meaning across scenes. */
@@ -300,6 +302,9 @@ export interface BrandProfile {
    *  slogan-like closers). Plain lowercase phrases; sent to the narration
    *  prompt and enforced by lib/narrationStyle.ts. */
   narrationTells?: readonly string[]
+  /** Entries of narrationTells that are fine in the calm third-person "story" voice
+   *  (only the promo ad voice bans them). Lowercase; must be members of narrationTells. */
+  narrationTellsAllowedInStory?: readonly string[]
   /** Abstract nouns a closing line should not lean on; the last line lands on a
    *  concrete image instead (knowledge base §6.3). Lowercase; EN and FR. */
   narrationAbstractNouns?: readonly string[]

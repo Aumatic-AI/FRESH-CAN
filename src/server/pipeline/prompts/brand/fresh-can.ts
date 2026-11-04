@@ -76,6 +76,12 @@ export const BRAND_PROFILE: BrandProfile = {
     'créer des souvenirs', 'sans tracas', 'sans chichi', "ce sont les petites choses", 'plus qu’un simple',
     "plus qu'un simple", 'un vent de fraîcheur',
   ],
+  // Fine in the "story" voice (relationships, community, place); only the promo ad voice bans them.
+  narrationTellsAllowedInStory: [
+    'close to home', 'more room for', 'togetherness', 'just in time',
+    // Imagery a surreal, poetic or documentary idea may need (the promo ad voice still bans them).
+    'detour', 'drift', 'linger', 'whisper', 'glimmer', 'unfold', 'wander', 'savour', 'dappled', 'golden hour',
+  ],
   narrationVaguePhrases: [
     'the whole reason', 'to count', 'world go by', 'world pass', 'watches the world', 'nothing needs',
     'for once', 'simply because', 'quite happy', 'wants one thing after another', 'what happens after',

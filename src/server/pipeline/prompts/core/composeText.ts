@@ -38,8 +38,9 @@ function bannedWordsLine(brand: BrandProfile): string {
 }
 
 /** The brand's stock phrases that make narration sound machine-written. */
-function narrationTellsLine(brand: BrandProfile): string {
-  const tells = brand.narrationTells ?? []
+function narrationTellsLine(brand: BrandProfile, promo = true): string {
+  const allowed = promo ? [] : brand.narrationTellsAllowedInStory ?? []
+  const tells = (brand.narrationTells ?? []).filter((t) => !allowed.includes(t))
   return tells.length > 0 ? ` Never use these stock phrases or close variants of them: ${tells.join('; ')}.` : ''
 }
 
@@ -150,9 +151,10 @@ export function composeIntentSystemPrompt(brand: BrandProfile, contentType: stri
     'idea: "central" if the idea is fundamentally about visiting, entering, shopping in, finding, or the ' +
     'existence/arrival of a unit, or is a direct how-it-works/customer-journey explainer; "incidental" if the ' +
     'unit could plausibly belong in the setting and reinforce context without being the subject (e.g. a ' +
-    'community moment on a street where a unit happens to be parked) — never forced in; "none" for pure food/ ' +
-    'nutrition education, recipes, produce/farm stories, awareness or community/emotional pieces with no ' +
-    'natural place for the unit, and any interior domestic setting (a kitchen, dining room, living room). ' +
+    'community moment on a street where a unit happens to be parked, or a story about what a unit does for a ' +
+    'community, a campus, a workplace or a remote place, where it anchors the place rather than driving the plot) — never ' +
+    'forced in; "none" for pure food/ ' +
+    'nutrition education, recipes, produce/farm stories, and any interior domestic setting (a kitchen, dining room, living room). ' +
     'Never invent a fact, statistic, price, launch date, store count, or place name beyond "Canada" that is ' +
     'not already in the brand facts above or the admin\'s own input.\n\n' +
     'Respond with strictly valid JSON matching this exact shape (all fields required, use "" for a genuinely ' +
@@ -169,8 +171,9 @@ export function composeIntentSystemPrompt(brand: BrandProfile, contentType: stri
     'honest and specific to this idea, never boilerplate) },\n' +
     '  "improvements": string (where the idea was thin, what you added to strengthen it — "" if it was ' +
     'already specific and complete),\n' +
-    '  "constraintsFromAdmin": string (anything the admin stated that is non-negotiable and must be ' +
-    'preserved exactly — "" if none)\n' +
+    '  "constraintsFromAdmin": string (only what the admin\'s own idea states as non-negotiable, such as a required ' +
+    'line, closing line, person, place or thing to avoid, quoted from the idea; NEVER the Topic, Category or Audience ' +
+    'lines, and never a copy of the whole idea — "" if none)\n' +
     '}'
   )
 }
@@ -486,42 +489,79 @@ function recentStoriesClause(recent: readonly string[] | undefined): string {
 const STORY_CRAFT_CLAUSE =
   'STORY CRAFT, also silent. Act as an award-winning commercial director and the social lead of a loved ' +
   'brand: correct but forgettable is a failure. (a0) If the idea already contains written voiceover or ad copy (quoted lines, a "Voiceover:" block, ad-style ' +
-  'sentences), that copy IS the concept: keep its opening question or line, its promises and its rhythm, tighten ' +
-  'it to fit the scenes, and do not replace it with an invented character, incident or object; brand and safety ' +
-  'rules still win (no "Imagine", "Meet", entering or exiting words, "Fresh-CAN" spelling, no invented claims). ' +
-  '(a) Otherwise the typed idea is RAW MATERIAL, not the finished story. First turn it into a catchier, more creative story ' +
-  'by tweaking it: keep its subject, its people and anything the creator explicitly required or ruled out, but change the ' +
-  'angle, the twist, the situation or the point of view so it becomes something a stranger would stop scrolling for ' +
-  '(an unexpected reason, a funny misunderstanding, a reversal, sharper small stakes). Never tweak away a stated ' +
-  'constraint, and never break brand truth. Write the result as "concept": two plain sentences. EVERY scene and ' +
-  'every narration line is built around this concept, not around the raw idea. (b) Insight: state in one line the ' +
-  'small human truth under the concept. Sketch three genuinely different takes on the idea (not three tones of the ' +
-  'same story), score them 1-5 on surprise, catchiness for a Reel, shareability, faithfulness to the idea\'s core, ' +
-  'brand truth and producibility, and shoot the boldest one that scores at least 4 on faithfulness, brand truth and ' +
-  'producibility: bold never beats true. A different idea must give a differently shaped story each time. ' +
-  '(b2) Write the story fields (hook, inner, turn, motif, ending_image, quotable) in plain everyday words about ' +
-  'concrete actions, as a person would say them out loud; no poetic imagery (no "a bitten strawberry", "follows ' +
-  'something passing", "quiet resting foot"). The ending_image is one simple thing a person does or sees. ' +
-  '(b3) Choose the narration voice. Default to "promo". Use "promo" for any idea that shows Fresh-CAN\'s ' +
-  'convenience, how it fits into a day, a product or produce showcase, a queue or errand gag, a trend or ' +
-  'fast-cut promo style, or that otherwise reads like a social ad: the voiceover then speaks to the viewer as ' +
-  '"you" and the picture carries the person. Use "story" ONLY when the idea centres on a specific relationship, ' +
-  'memory or emotional moment (a grandparent\'s recipe, a first time, a family ritual). When unsure, choose "promo". ' +
-  '(c) Pick ONE framework from small_quest, pressure_cooker, ' +
-  'time_machine, demo_drop, educator, origin_story, myth_killer, countdown, cliffhanger, pas, bab, pixar_spine ' +
-  '(small_quest unless the idea fits another better). (d) Hook: draft four openers across at least three of ' +
+  'sentences), that copy IS the narration: keep every sentence in order and in the creator\'s own words, split ' +
+  'across the scenes (put each sentence\'s meaning in the narration_intent of the scene that carries it, and the ' +
+  'first line in scene 1), tighten only where a scene\'s time demands it, and do not replace it with an invented ' +
+  'character, incident or object. A closing line the creator wrote (for example "Brand. Tagline.") is SPOKEN in the ' +
+  'final scene and is the last thing said, never only stored as a call to action. The creator\'s own opening may ' +
+  'use a word the brand otherwise avoids as an opener (such as "Imagine"); the ban on "Imagine", "Meet" and ' +
+  '"Introducing" applies only to copy you invent. Safety rules still win (entering or exiting words, "Fresh-CAN" ' +
+  'spelling, no invented claims). A surreal, metaphorical or high-concept idea keeps its premise literal in BOTH the ' +
+  'pictures and the words (colour draining from the world stays about colour draining from the world); never turn ' +
+  'a metaphor into a literal recipe, dinner or shopping story. (a00) Match the scale the idea names: a ' +
+  'neighbourhood, a world or a community is shown at that scale, with several different people and places (for ' +
+  'example a street, several homes and kitchens, a market, the container) and the change spreading, never shrunk ' +
+  'to one person in one kitchen. Cast as many different people as the story needs, strangers and neighbours ' +
+  'included; build the story around one or two people ONLY when the idea itself is about them. Do not default to a ' +
+  'single resident or shopper. ' +
+  '(a) Otherwise the typed idea IS the story. Keep its premise, its images, its setting, its order of events, its ' +
+  'scale, its register (surreal, funny, tender, epic, documentary) and everything the creator required or ruled out. ' +
+  'List silently every picture, event and turn the idea names, and give each one its own scene, in the order the idea ' +
+  'gives them. Your craft goes into HOW it is told: a sharper first frame, specific details, striking transitions, ' +
+  'fresh people and places that serve the same idea, a better hook and ending. Add a twist or reversal only where the ' +
+  'idea leaves room for one, never to replace what it says. Never simplify an ambitious or surreal idea into an ' +
+  'ordinary errand, a dinner or a single person\'s small moment: produce it at its own ambition. Never tweak away a ' +
+  'stated constraint, and never break brand truth. Write the result as "concept": two plain sentences that restate the ' +
+  'idea itself, not a different story. EVERY scene and every narration line is built around the idea\'s own events. ' +
+  '(b) Insight: state in one line the human truth under the idea. Sketch three different ways to TELL this same idea ' +
+  '(different structure, point of view or transitions, never three different stories), score them 1-5 on surprise, ' +
+  'catchiness, shareability, faithfulness to the idea, brand truth and producibility, and use the boldest one that ' +
+  'scores 5 on faithfulness and at least 4 on brand truth and producibility. Producibility limits HOW a thing is ' +
+  'shown, never WHAT the idea contains. A different idea must give a differently shaped story each time. ' +
+  '(b2) Write the story fields (hook, inner, turn, motif, ending_image, quotable) in clear words about concrete ' +
+  'actions and images, as a person would say them out loud. Keep them plain unless the idea\'s own register is poetic, ' +
+  'surreal or cinematic, in which case vivid imagery in the idea\'s own spirit is welcome. The ending_image is one ' +
+  'clear thing a person does or sees. ' +
+  '(b3) Choose the narration voice from the idea itself. Use "promo" when the idea is a product or produce showcase, ' +
+  'a convenience or errand gag, a trend or fast-cut ad: the voiceover speaks to the viewer as "you" and the picture ' +
+  'carries the person. Use "story" (calm third person, observed and specific; heartfelt is welcome) when the idea ' +
+  'centres on a relationship, a memory, an emotional moment, a community, a place or what saved time becomes. ' +
+  'Pick the voice that fits the story shape you chose in (c), not a default: a place, community, ensemble, ' +
+  'contrast or ripple story always uses "story" (a calm narrator who may address the viewer if the creator\'s own copy does), ' +
+  'and the lead character is not required. ' +
+  '(b4) Read the idea\'s meaning before its plot: who the people are (one person, a family, seniors, a campus or workplace, ' +
+  'a remote or cold community), what honestly gets in their way, and what the saved time, effort or access becomes for them. ' +
+  'Record in story.impact_angle one of personal, family, community, place or manifesto. ' +
+  '(c) Pick the story shape the idea implies, as ONE framework from small_quest (one person, one small errand), ' +
+  'pressure_cooker, time_machine, demo_drop, educator, origin_story, myth_killer, countdown, cliffhanger, pas, bab, ' +
+  'pixar_spine, ensemble (a few people, each with one specific detail), many_lives (a different person each scene, the ' +
+  'unit as the recurring anchor), place_transformation (the place is the character: the same corner empty, then, after a ' +
+  'cut and from the same angle, with the unit and people around it, never showing arrival), contrast_cut (the old hard ' +
+  'way, then the easier way and what it frees up) or ripple_effect (one change spreading through a community). ' +
+  'Do not fall back on small_quest unless the idea really is one small errand. (d) Hook: draft four openers across at least three of ' +
   'story_open, small_problem, pov, result_first, question, teach, callout, pattern_interrupt, number_list, ' +
   'confession; keep the most specific one that can be paid off by the last scene, recorded in story.hook as the SPOKEN first line itself (plain words, 12 or fewer), with the opening picture and the ' +
   'opening line saying the same thing, an action already under way in the first frame, and never a logo or the ' +
-  'container alone. (e) Give the lead character one want and one small worry (inner), a turn where something ' +
-  'changes, and ONE recurring object or gesture (motif) that returns, in a new form, near the end (in a "promo" voice the motif is a picture-only detail and is never spoken), and one small running thread (an idea that comes back two or three times, never in every scene). (f) Choose the ' +
+  'container alone. (e) Give the story its centre: for a single-person story, one want and one small worry (inner); for ensemble or ' +
+  'many_lives, each person one specific detail and the unit as the thread between them; for place_transformation, the ' +
+  'place itself (what it was, what it becomes); for contrast_cut or ripple_effect, the before and the after. Then a ' +
+  'turn where something changes, and ONE recurring object or gesture (motif) that returns, in a new form, near the end (in a "promo" voice the motif is a picture-only detail and is never spoken), and one small running thread (an idea that comes back two or three times, never in every scene). (f) Choose the ' +
   'ending_image: a concrete, feeling-led final picture, not a summary or slogan, and make the final scene\'s ' +
   'visual_description actually show it. (g) Decide the one line worth quoting: plain and specific, never a ' +
   'slogan, and which scene it lands in. (h) Give every scene a story_role (hook, context, turn, payoff or ' +
   'close) and an emotion that differs from its neighbours where the story allows, and write what its narration ' +
   'will ADD that the picture cannot show (a thought, a memory, a worry, a reason), never a description of the ' +
   'picture. (i) Polish: cut or merge the weakest scene, sharpen the first frame, make each scene\'s single action ' +
-  'more specific. Never open narration with "In a world where", "Imagine", "Meet" or "Introducing".'
+  'more specific. Never open narration with "In a world where", "Imagine", "Meet" or "Introducing". (j) VISUAL CRAFT, ' +
+  'for every video: give it ONE visual idea and keep it consistent: in "look", a concrete, distinctive style (the ' +
+  'light, the colour grade, the lens feel, the season or weather), never just "cinematic" or "warm". Vary shot size and ' +
+  'angle across the scenes (a wide establishing view, medium shots, a close detail or insert, at least one unusual ' +
+  'angle such as low, high or overhead), and never give two neighbouring scenes the same framing. Compose each frame ' +
+  'with depth: a foreground element, a layered background, motivated light (window light, low sun, lamps, steam, ' +
+  'frost, rain) and one striking detail or "hero frame" in each scene (a reflection, a silhouette, a contrast of ' +
+  'scale, an unexpected viewpoint), while the action stays simple enough for one clean shot. This craft never ' +
+  'overrides brand truth: the container design and wordmark rules, clean fresh food, modest dress, people mid-action ' +
+  'and real-looking photography all still apply.'
 
 /**
  * Produces the script AND its scene-by-scene shot plan in ONE call
@@ -781,6 +821,18 @@ const SHORT_FILM_CAMERA_MOVING =
   'scrolling background. Keep each action small enough for one short clip (reaching, holding, looking, a few ' +
   'steps) rather than a long walk toward or away from the camera —'
 
+/** What the dashboard's Script Type values mean, so the model is not left guessing. */
+function scriptTypeMeaning(scriptType: string | undefined): string {
+  const t = (scriptType ?? '').trim().toUpperCase()
+  if (t === 'SOLUTION') {
+    return ' (an advocate or narrator voice about the problem and its answer; it may use at most one real statistic from the brand facts)'
+  }
+  if (t === 'COMMUNITY') {
+    return " (told from inside one community member's life or place; never presented as a real testimonial or a real person)"
+  }
+  return ''
+}
+
 export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoScriptSystemPromptOptions): string {
   const moves = opts.cameraMoves ?? cameraMovesEnabled()
   const shotNotesCamera = moves ? SHOT_NOTES_CAMERA_MOVING : SHOT_NOTES_CAMERA_STATIC
@@ -788,7 +840,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
   const preamble = opts.sceneNotes
     ? `Build this video's story and every one of its scenes around the user's own creative idea: ` +
       `"${opts.sceneNotes}". This idea alone decides what the video is about and what happens in it — ` +
-      `never blend in or substitute a different topic. The idea fixes the subject and anything it requires; HOW it is told is yours to make catchier and more creative (see STORY CRAFT). ${brand.neutralIdentityLine ?? brand.missionStatement} ` +
+      `never blend in or substitute a different topic. The idea fixes the subject and anything it requires; Follow its events, images and order faithfully; your creativity goes into HOW it is told, never into replacing or shrinking what it says (see STORY CRAFT). ${brand.neutralIdentityLine ?? brand.missionStatement} ` +
+      `Only if your story.impact_angle is community, place or manifesto, this fuller context about why the brand exists may inform the story's meaning (ignore it for a personal or family idea): ${brand.missionStatement}${statsLine(brand)} ` +
       `That is background context for tone and brand accuracy only: a fixed constraint on how the brand's ` +
       `container, app, or other branding must look or sound IF the idea above genuinely calls for them, never a ` +
       `second angle, and never a reason to insert brand or mission messaging into a scene the idea doesn't ` +
@@ -800,7 +853,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
   return (
     preamble +
     `You are a video scriptwriter and shot planner. Produce a short-form marketing video script AND its ` +
-    `scene-by-scene shot plan in ONE response. Script type: ${opts.scriptType}.\n\n` +
+    `scene-by-scene shot plan in ONE response. Script type: ${opts.scriptType}${scriptTypeMeaning(opts.scriptType)}.\n\n` +
     'Respond with strictly valid JSON matching this exact shape (the core fields — script, visual_description, ' +
     'duration_seconds, scenes, and each scene\'s scene_number/visual_description/shot_notes/narration_intent/' +
     'target_duration_seconds — are required; the additional planning fields below are optional but strongly ' +
@@ -810,7 +863,7 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     '  "script": string (the full narration/voiceover text, human-readable, in English, for internal review only),\n' +
     '  "visual_description": string (one-paragraph overview of the video\'s overall visual concept),\n' +
     '  "duration_seconds": number (total estimated runtime, summing the scenes below),\n' +
-    '  "story": { "hook": string (the SPOKEN first line a viewer hears, in plain words, 12 or fewer, never a description of the picture), "arc": string, "resolution": string, "cta": string or null, "concept": string (the tweaked story in two plain sentences), "voice": "promo" or "story" (see the voice rule), "thread": string (one small running idea that returns two or three times, never every scene), "insight": string, ' +
+    '  "story": { "hook": string (the SPOKEN first line a viewer hears, in plain words, 12 or fewer, never a description of the picture), "arc": string, "resolution": string, "cta": string or null, "concept": string (the tweaked story in two plain sentences), "voice": "promo" or "story" (see the voice rule), "impact_angle": "personal" | "family" | "community" | "place" | "manifesto", "thread": string (one small running idea that returns two or three times, never every scene), "insight": string, ' +
     '"framework": string (one of the framework keys above), "hook_type": string (one of the hook types above), ' +
     '"inner": string, "motif": string, "turn": string, "ending_image": string, "quotable": string (the idea of ' +
     'the line worth quoting, not final wording), "quotable_scene": number } (a compact summary of your planning ' +
@@ -818,7 +871,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'real answer for),\n' +
     '  "look": { "time_of_day": string, "lighting": string, "palette": string, "style_direction": string, ' +
     '"camera_language": string } (the visual mood/style for the WHOLE video, deferential to whatever the scene ' +
-    'idea itself already implies — this replaces guessing a default mood per image later),\n' +
+    'idea itself already implies — this replaces guessing a default mood per image later; make style_direction and ' +
+    'palette concrete and distinctive (a light, a grade, a lens feel, a colour story), never a generic word like "cinematic"),\n' +
     '  "cast_bible": [ { "id": string (short, stable, e.g. "mother"), "role": string, "age_range": string, ' +
     '"appearance": string (specific and unambiguous enough that a different artist working from this text ' +
     'alone, with no image reference, would draw the same individual every time — always state apparent ' +
@@ -832,7 +886,9 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     (brand.dressRule ? `; ${brand.dressRule}` : '') + '), ' +
     '"distinguishing_details": string } ] (one entry per named or recurring person in the story — locked ' +
     'physical descriptions to reuse VERBATIM in every scene that person appears in, the backbone of keeping ' +
-    'them looking the same scene to scene; omit entirely for a video with no recurring named people),\n' +
+    'them looking the same scene to scene; for an ensemble, community or place story list the several different ' +
+    'people (each may appear in only one or two scenes), not a single lead; omit entirely for a video with no ' +
+    'recurring named people),\n' +
     '  "locations": [ { "id": string, "description": string, "continuity_details": string } ] (one entry per ' +
     'distinct place the story visits, if it revisits any; omit for a single-location or single-shot video),\n' +
     '  "scenes": [\n' +
@@ -866,7 +922,13 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'scene changed location, that is exactly when losing their locked appearance is most noticeable. [] or ' +
     'omit only if the video has no cast_bible or genuinely no cast_bible person is shown in this scene. Every ' +
     'cast_bible person your visual_description shows or mentions, in any role (guest, neighbour, passenger, ' +
-    'customer), is listed here, so a scene never has a person in it who is missing from this list),\n' +
+    'customer), is listed here, so a scene never has a named or featured person in it who is missing from this ' +
+    'list. The one exception is generic background people (a few neighbours in the distance, shoppers across a ' +
+    'street, a market crowd, passers-by) who matter only as atmosphere: describe them in visual_description as an ' +
+    'unnamed group ("a few neighbours in the distance"), keep them small, away from the camera and out of focus ' +
+    'or in profile, give them no cast_bible entry and no close-up, and never make one of them speak or act on the ' +
+    'story. Anyone who is in focus, near the camera, repeated across scenes or doing something the story needs ' +
+    'is a cast_bible person),\n' +
     '      "props_present": string[] (visually significant objects this scene establishes or carries forward),\n' +
     `      "unit_presence": "none" | "background" | "featured" (is ${brand.name}'s physical unit the ` +
     'subject of this scene, plausibly present in the background, or absent — an honest per-scene read, never a default. ' +
@@ -948,7 +1010,8 @@ export function composeVideoScriptSystemPrompt(brand: BrandProfile, opts: VideoS
     'motion to black.' +
     (opts.sceneNotes
       ? ' Every scene must still serve the creative idea given at the very start of this prompt — never drift ' +
-        'into generic brand, mission, or food-desert messaging unless that idea itself genuinely calls for it, ' +
+        'into generic brand, mission, or food-desert messaging unless that idea itself genuinely calls for it ' +
+        '(a community, place or manifesto idea does call for it), ' +
         'and never force the container into a scene it does not genuinely fit. The container appearing in one ' +
         'scene is never a reason to carry it into a later scene — only include it again if that later scene\'s ' +
         'own idea genuinely calls for it too.' +
@@ -980,7 +1043,7 @@ function narrationOpenersLine(brand: BrandProfile): string {
   const open = brand.narrationBannedOpeners ?? []
   const close = brand.narrationBannedClosers ?? []
   return (
-    (open.length > 0 ? ` Never open the video with: ${open.map((o) => `"${o.trim()}"`).join(', ')}.` : '') +
+    (open.length > 0 ? ` Never open the video with: ${open.map((o) => `"${o.trim()}"`).join(', ')} (unless the creator's own written copy opens with it).` : '') +
     (close.length > 0 ? ` Never close it with: ${close.map((o) => `"${o}"`).join(', ')}.` : '')
   )
 }
@@ -1003,7 +1066,7 @@ function storySpineBlock(spine: NarrationSpine | undefined, language = 'English'
     ['hook idea', spine.hook],
     ['hook type', spine.hook_type],
     ['framework', spine.framework],
-    ["the lead's inner life", spine.inner],
+    ["inner life (a person's, a place's or a community's)", spine.inner],
     ['running thread (returns two or three times, never every scene)', spine.thread],
     ['motif', spine.voice === 'promo' ? undefined : spine.motif],
     ['turn', spine.turn],
@@ -1022,7 +1085,7 @@ function storySpineBlock(spine: NarrationSpine | undefined, language = 'English'
     'and no two scenes take the same angle. ' +
     (spine.voice === 'promo'
       ? 'This is a PROMO voiceover: speak to the viewer as "you", never about the lead\'s inner life, and never mention props, colours or small details that only the picture shows. '
-      : 'Tell the lead\'s inner life in the third person (what she wonders, remembers or worries about), never as "I". The motif is named early and comes back near the end in a new form: the same thing, not necessarily the same words. ') +
+      : 'Tell the story\'s inner life (what a person, a place or a community wonders, remembers, feels or lacks) in a calm narrator voice, never as "I" or "we"; if the creator\'s written copy speaks to the viewer, keep that. The motif is named early and comes back near the end in a new form: the same thing, not necessarily the same words. ') +
     'Place the one line worth quoting in its scene: plain, specific ' +
     'and speakable, never a slogan. The last line lands on the ending image as a small concrete moment that matches ' +
     'what the final scene shows. Where a scene\'s picture says it all, use the low end of its word band, but never in ' +
@@ -1123,9 +1186,13 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'QR code identifies rather than pays, or that nothing is scanned) once across the whole video, in the scene ' +
     'it fits best, and keep the other scenes free of repeated disclaimers. ' +
     (opts.sceneNotes
-      ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it. If it contains written voiceover or ad copy, build the narration from ` +
-        'those lines (keep its opening question and its best phrases, adapted to each scene\'s word band), while the ' +
-        'brand and safety rules below still win. Any ' +
+      ? `The creator's own idea for this video is: "${opts.sceneNotes}". Narration stays faithful to it. If it contains written voiceover or ad copy, THAT copy is the narration: use ` +
+        'its sentences in order and in its own words, one or more per scene, trimming or joining only to fit each scene\'s ' +
+        'word band, and let narration_intent show which sentence a scene carries. Its closing line is spoken, as the last ' +
+        'thing said, in the final scene. Its own opening may use an opener the brand otherwise bans. Add words of your ' +
+        'own only where a band needs filling, in the same voice and about the same premise, never a new dinner, shopping ' +
+        'or recipe story. The brand and safety rules below still win (including the entering and exiting rule and ' +
+        'the "Fresh-CAN" spelling). Any ' +
         'action it rules out (for example "no scanning") never appears in the wording. '
       : '') +
     'HUMAN VOICE. One unseen storyteller tells the whole video, the way a sharp, warm, observant person would tell it ' +
@@ -1178,6 +1245,10 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'vague reflective filler ("that can be the whole reason", "the world passes by", "doesn\'t need to count"). Each ' +
     'scene is a new step: two scenes must never carry the same beat (for example two "she relaxes" lines). The ' +
     'first line is a real hook in 12 words or fewer, a specific and curious situation, never a summary of her mood. ' +
+    'REGISTER. Match the narration\'s style to the idea\'s own register. When the creator\'s idea is surreal, poetic, ' +
+    'cinematic, epic or documentary, or the creator wrote the voiceover, the narration may be lyrical, use metaphor and ' +
+    'vivid imagery, stronger rhythm and longer or shorter lines, and the PLAIN WORDS limits, the one-image-per-scene ' +
+    'limit and the 12-word hook below do not apply; the idea\'s premise and the creator\'s own wording come first. ' +
     'PLAIN WORDS. A viewer hears this once, at scroll speed, so every line must be understood on the first listen: ' +
     'the words you would use texting a friend, short common words, one clear idea. No literary or scene-painting ' +
     'imagery (nothing like "a detour", "a bitten strawberry", "leaves drifting"): say what happens or what she ' +
@@ -1189,7 +1260,7 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     'the video sounds like one person talking, not a row of separate slogans. Vary the rhythm (a longer line, then a ' +
     'short one), keep one idea per line, never a run-on, and do not end every thought with a full stop. ' +
     'PERSONALITY. Where the story invites it, be witty: a specific, plain-worded observation or a small human ' +
-    'truth people recognise. Never a joke in every scene, never at anyone\'s expense, never about hardship. Let the ' +
+    'truth people recognise. Never a joke in every scene, never at anyone\'s expense, never mocking or pitying hardship (an honest barrier, stated plainly and with dignity, is fine). Let the ' +
     'idea choose the tone (playful, heartfelt, surprising or informative), and let a quiet scene stay quiet. Prefer a ' +
     'detail that could only belong to THIS story over any line that could sit in another lifestyle ad; swapping one ' +
     'cliché for another does not fix a vague line. Aim for one line a listener would repeat. ' +
@@ -1207,7 +1278,7 @@ export function composeLocalizeScriptSystemPrompt(brand: BrandProfile, opts: Loc
     `How the service works (${(brand.narrationHardFacts ?? []).map((f) => f.label).join(', ') || 'its mechanics'}) is ` +
     'mentioned in at most one scene of the whole video, briefly and only if the story needs it. Say the brand name once, plainly, inside the story\'s logic as the quiet enabler of its next step, never as an ' +
     'announcement; add no product detail a good line does not need. End the last scene on a small, concrete human moment, never on a slogan, a lesson or the ' +
-    `idea's own tagline.${narrationTellsLine(brand)}${narrationOpenersLine(brand)}${storySpineBlock(opts.spine, opts.language)}${recentOpenersBlock(opts.recentOpeners)} Write it as natural spoken narration for a ` +
+    `idea's own tagline.${narrationTellsLine(brand, !opts.spine || opts.spine.voice !== 'story')}${narrationOpenersLine(brand)}${storySpineBlock(opts.spine, opts.language)}${recentOpenersBlock(opts.recentOpeners)} Write it as natural spoken narration for a ` +
     'real story, never as scripted ad copy or a voiceover that sounds like a commercial. The one exception: if ' +
     `a narration_intent explicitly calls for naming ${brand.name} (or otherwise references the brand by name), the ` +
     `localized ${opts.language} wording MUST include that name literally, spoken naturally — never paraphrase, ` +
@@ -1257,9 +1328,9 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
     'the writer worked from), the brand name, the real facts that may be cited, and every scene with its story_role, ' +
     'what the picture shows ("on_screen"), the narration line and its word band. Be strict and specific: report only ' +
     'defects a listener would notice, and never ask for a change for taste alone.\n\n' +
-    'Judge these. (1) Arc: does the narration tell one small story with a turn and a warm landing? (2) Each line ' +
+    'Judge these. (1) Arc: does the narration tell one story, of a person, a group or a place, with a turn and a landing that fits its tone? (2) Each line ' +
     'adds something the picture cannot show (a thought, memory, worry, reason) rather than describing it. (3) The ' +
-    'lead\'s inner life comes through naturally, in the third person. (4) The hook: the first line is specific and ' +
+    'story\'s inner life (a person\'s, a place\'s or a community\'s) comes through naturally. (4) The hook: the first line is specific and ' +
     'the last scene pays it off. (5) MOTIF: the spine\'s motif recurs in meaning, not necessarily in the same words ' +
     '(the same object or gesture, or a clear equivalent, early and again near the end). If it does not return, say ' +
     'which scene should carry it. (6) QUOTABLE: one plain, speakable line worth quoting exists, never a slogan. ' +
@@ -1270,7 +1341,10 @@ export function composeNarrationReviewSystemPrompt(brand: BrandProfile, opts: { 
     'picking up the last, not a row of stand-alone full-stop slogans; also not one long run-on. (10) PERSONALITY: a ' +
     'specific, witty or human observation where the story invites it, not a joke in every scene. Judge it against ' +
     'interchangeable lifestyle-ad copy: a line that could sit unchanged in any other grocery or lifestyle ad is a ' +
-    'scene_issue, even without a stock phrase. (11) BRAND FIT: the brand name is said once, inside the story\'s ' +
+    'scene_issue, even without a stock phrase. (12) CREATOR COPY: if creator_idea contains written voiceover or a closing line, the narration must keep those ' +
+    'sentences in order and in the creator\'s words (adjusted only to fit a word band), and the closing line must be ' +
+    'spoken in the final scene; a missing or rewritten creator line is a scene_issue naming the line. Also check the ' +
+    'narration stays about the idea\'s own premise, not a literal dinner or shopping story. (11) BRAND FIT: the brand name is said once, inside the story\'s ' +
     'logic as the quiet enabler of the next step, not as an interruption or a feature announcement. The ' +
     'voice is allowed to be playful; never mark wit down. CONTINUITY: each line should grow out of the previous one, ' +
     'and no two scenes should carry the same emotional beat (for example two lines that both say she is relaxing); ' +

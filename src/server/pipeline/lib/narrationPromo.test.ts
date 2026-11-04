@@ -50,14 +50,14 @@ describe('promo voice: direct address for product-led ideas', () => {
     expect([...findNarrationStyleIssues(scenes(old), { ...opts, promo: false }).values()].flat().join(' ')).not.toMatch(/narrates the character/)
   })
 
-  it('the planner decides the voice, defaulting to promo when unsure', () => {
+  it('the planner decides the voice from the idea, with no promo default', () => {
     const planner = composeVideoScriptSystemPrompt(BRAND_PROFILE, { sceneNotes: 'x' } as never)
     expect(planner).toMatch(/"voice": "promo" or "story"/)
-    expect(planner).toMatch(/shows Fresh-CAN's convenience/)
-    expect(planner).toMatch(/Default to "promo"/)
-    expect(planner).toMatch(/queue or errand gag/)
-    expect(planner).toMatch(/Use "story" ONLY when the idea centres on a specific relationship/)
-    expect(planner).toMatch(/When unsure, choose "promo"/)
+    expect(planner).toMatch(/Choose the narration voice from the idea itself/)
+    expect(planner).not.toMatch(/Default to "promo"/)
+    expect(planner).toMatch(/convenience or errand gag/)
+    expect(planner).toMatch(/Use "story" \(calm third person/)
+    expect(planner).not.toMatch(/When unsure, choose "promo"/)
     expect(narrationSpineFromStory({ concept: 'c', voice: 'promo' })?.voice).toBe('promo')
     expect(narrationSpineFromStory({ concept: 'c', voice: 'story' })?.voice).toBe('story')
     expect(narrationSpineFromStory({ concept: 'c', voice: 'weird' })?.voice).toBeUndefined()
@@ -139,7 +139,7 @@ describe('regression: draft 8df014d1 (cryptic "yellow clip", "whole trip" said f
     const p = composeLocalizeScriptSystemPrompt(BRAND_PROFILE, { language: 'English', sceneNotes: 'Voiceover: "What if...?"', spine: { concept: 'c', motif: 'the yellow clip', voice: 'promo' } })
     expect(p).toMatch(/UNDERSTANDABLE/)
     expect(p).toMatch(/no "that yellow clip", "the tote"/)
-    expect(p).toMatch(/build the narration from those lines/)
+    expect(p).toMatch(/THAT copy is the narration/)
     expect(p).toMatch(/never mention props, colours or small details that only the picture shows/)
     expect(p).not.toMatch(/motif: the yellow clip/)
     expect(p).not.toMatch(/The motif is named early/)
@@ -148,7 +148,7 @@ describe('regression: draft 8df014d1 (cryptic "yellow clip", "whole trip" said f
   })
   it('the planner treats creator-written copy as the concept, and the review wants plain fixes', () => {
     const planner = composeVideoScriptSystemPrompt(BRAND_PROFILE, { sceneNotes: 'x' } as never)
-    expect(planner).toMatch(/that copy IS the concept/)
+    expect(planner).toMatch(/that copy IS the narration/)
     expect(planner).toMatch(/never spoken/)
     expect(composeNarrationReviewSystemPrompt(BRAND_PROFILE)).toMatch(/cryptic reference/)
   })

@@ -154,12 +154,13 @@ describe('shared prompt wiring', () => {
 })
 
 describe('idea becomes a tweaked concept that drives the narration', () => {
-  it('the planner is told to tweak the raw idea into a catchier concept, keeping constraints', async () => {
+  it('the planner is told the idea IS the story: keep its events and register, add craft in the telling, keep constraints', async () => {
     const { composeVideoScriptSystemPrompt } = await import('../prompts/index')
     const p = composeVideoScriptSystemPrompt(BRAND_PROFILE, { sceneNotes: 'A dad and son buy apples.' } as never)
-    expect(p).toMatch(/RAW MATERIAL/)
+    expect(p).toMatch(/the typed idea IS the story/)
+    expect(p).toMatch(/Never simplify an ambitious or surreal idea/)
     expect(p).toMatch(/"concept"/)
-    expect(p).toMatch(/explicitly required or ruled out/)
+    expect(p).toMatch(/required or ruled out/)
   })
   it('the concept reaches the narration spine and the narration prompt', async () => {
     const { narrationSpineFromStory } = await import('../steps/video/generateScript')

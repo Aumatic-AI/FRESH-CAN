@@ -548,7 +548,11 @@ describe('composeVideoScriptSystemPrompt', () => {
     expect(prompt).toContain('background context for tone and brand accuracy only')
     expect(prompt.indexOf('A senior reaching a mobile unit at dusk')).toBeLessThan(prompt.indexOf('TEST MISSION STATEMENT'))
     expect(prompt).not.toContain('TEST CATEGORY BRIEF')
-    expect(prompt).not.toContain('1 in 5 test subjects prefer this fixture')
+    // The stats are offered only behind the impact_angle gate (community, place or manifesto ideas), never plainly.
+    expect(prompt).toContain('Only if your story.impact_angle is community, place or manifesto')
+    expect(prompt.indexOf('1 in 5 test subjects prefer this fixture')).toBeGreaterThan(
+      prompt.indexOf('Only if your story.impact_angle is community, place or manifesto'),
+    )
   })
 
   it('still carries voice/tone guidance (banned words) even when the category brief and stats are dropped for a given scene idea', () => {
@@ -574,7 +578,10 @@ describe('composeVideoScriptSystemPrompt', () => {
       sceneNotes: 'A cozy autumn family dinner',
     })
     expect(prompt).toContain('TEST NEUTRAL IDENTITY LINE')
-    expect(prompt).not.toContain('TEST MISSION STATEMENT')
+    // The fuller mission now appears only inside the impact_angle-gated sentence, never as the plain background line.
+    const gate = prompt.indexOf('Only if your story.impact_angle is community, place or manifesto')
+    expect(gate).toBeGreaterThan(-1)
+    expect(prompt.indexOf('TEST MISSION STATEMENT')).toBeGreaterThan(gate)
   })
 
   it('falls back to missionStatement when neutralIdentityLine is not configured for the brand', () => {
@@ -708,7 +715,10 @@ describe('cast guidance in the video script prompt', () => {
   it('asks for gender in appearance and for every person shown to be listed in cast_present', () => {
     const prompt = composeVideoScriptSystemPrompt(testBrand, { category: 'Test Category', scriptType: 'SOLUTION', targetDurationSeconds: 36 })
     expect(prompt).toContain('gender, ethnicity/skin tone')
-    expect(prompt).toContain('is listed here, so a scene never has a person in it who is missing from this list')
+    expect(prompt).toContain('is listed here, so a scene never has a named or featured person in it who is missing from this list')
+    // Generic background people are the one allowed exception, described as an unnamed group.
+    expect(prompt).toContain('generic background people')
+    expect(prompt).toContain('no cast_bible entry')
   })
 })
 

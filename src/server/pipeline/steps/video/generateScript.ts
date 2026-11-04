@@ -171,11 +171,14 @@ const STORY_ROLE_VALUES = new Set<string>(STORY_ROLES)
 export const STORY_FRAMEWORKS = [
   'small_quest', 'pressure_cooker', 'time_machine', 'demo_drop', 'educator',
   'origin_story', 'myth_killer', 'countdown', 'cliffhanger', 'pas', 'bab', 'pixar_spine',
+  'ensemble', 'many_lives', 'place_transformation', 'contrast_cut', 'ripple_effect',
 ] as const
 export const HOOK_TYPES = [
   'story_open', 'small_problem', 'pov', 'result_first', 'question', 'teach',
   'callout', 'pattern_interrupt', 'number_list', 'confession',
 ] as const
+export const IMPACT_ANGLES = ['personal', 'family', 'community', 'place', 'manifesto'] as const
+const IMPACT_ANGLE_VALUES = new Set<string>(IMPACT_ANGLES)
 const FRAMEWORK_VALUES = new Set<string>(STORY_FRAMEWORKS)
 const HOOK_TYPE_VALUES = new Set<string>(HOOK_TYPES)
 
@@ -209,6 +212,8 @@ export function normalizeStory(value: unknown): VideoScriptStory | undefined {
   if (voice === 'promo' || voice === 'story') out.voice = voice
   const framework = text(v.framework)?.toLowerCase()
   if (framework && FRAMEWORK_VALUES.has(framework)) out.framework = framework
+  const impactAngle = text(v.impact_angle)?.toLowerCase()
+  if (impactAngle && IMPACT_ANGLE_VALUES.has(impactAngle)) out.impact_angle = impactAngle
   const hookType = text(v.hook_type)?.toLowerCase()
   if (hookType && HOOK_TYPE_VALUES.has(hookType)) out.hook_type = hookType
   const inner = text(v.inner)
