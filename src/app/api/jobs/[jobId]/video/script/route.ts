@@ -3,6 +3,12 @@ import { createClient } from '@supabase/supabase-js'
 import { getVideoScenes, upsertVideoScenes } from '@/server/pipeline/db'
 import { applyScriptEdits, buildScriptSummary } from '@/server/pipeline/steps/video/updateScript'
 import { readSceneNarration } from '@/lib/videoNarrationBudget'
+import { BRAND_PROFILE } from '@/server/pipeline/prompts/index'
+import {
+  applySingleShotEdits,
+  readSingleShotDraft,
+  spokenScript,
+} from '@/server/pipeline/steps/singleShot/updateSingleShot'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -25,7 +31,7 @@ export async function POST(
   const { jobId } = await params
   const supabase = getSupabase()
 
-  let body: { scenes?: unknown } = {}
+  let body: { scenes?: unknown; prompt?: unknown; lines?: unknown; frenchLines?: unknown } = {}
   try {
     const text = await req.text()
     if (text) body = JSON.parse(text)
@@ -47,6 +53,35 @@ export async function POST(
       { error: `Script can only be edited while the pipeline is draft_ready (current: ${pipeline.status})` },
       { status: 409 },
     )
+  }
+
+  // TEST-ONLY single-shot flow: edit the one Seedance prompt and its spoken lines. Re-checked
+  // with the enhancer's own validator, so an edit cannot break a rule the AI draft had to follow.
+  const { data: ssRow, error: ssErr } = await supabase
+    .from('content_drafts')
+    .select('*')
+    .eq('content_pipeline_id', pipeline.id)
+    .maybeSingle()
+  if (ssErr) return NextResponse.json({ error: ssErr.message }, { status: 500 })
+  const ssCurrent = readSingleShotDraft(ssRow?.draft_data)
+  if (ssRow && ssCurrent) {
+    const applied = applySingleShotEdits(ssCurrent, { prompt: body.prompt, lines: body.lines, frenchLines: body.frenchLines }, BRAND_PROFILE)
+    if ('error' in applied) return NextResponse.json({ error: applied.error }, { status: 400 })
+    const { data: saved, error: saveErr } = await supabase
+      .from('content_drafts')
+      .update({
+        draft_data: {
+          ...(ssRow.draft_data as Record<string, unknown>),
+          script: spokenScript(applied.draft.spoken_lines),
+          single_shot: applied.draft,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', ssRow.id)
+      .select()
+      .single()
+    if (saveErr) return NextResponse.json({ error: saveErr.message }, { status: 500 })
+    return NextResponse.json({ scenes: [], draft: saved })
   }
 
   const scenes = await getVideoScenes(supabase, pipeline.id)

@@ -82,6 +82,24 @@ interface VideoDraftData {
   script?: string
   visual_description?: string
   duration_seconds?: number
+  // TEST-ONLY single-shot Seedance flow (branch test/seedance-single-shot): the draft is
+  // one prompt + its spoken lines instead of a scene plan.
+  single_shot?: SingleShotDraftData
+}
+
+interface SingleShotDraftData {
+  prompt: string
+  audio_mode: 'narration' | 'dialogue'
+  audio_reason: string
+  hook: string
+  speakers: { label: string; description: string }[]
+  spoken_lines: { speaker: string; text: string }[]
+  container_shown: 'none' | 'exterior' | 'interior' | 'both'
+  reference_image_urls: string[]
+  original_idea: string
+  aspect_ratio: string
+  languages?: 'EN' | 'FR' | 'BOTH'
+  french_lines?: string[]
 }
 
 // ─── Video pipeline/track status (worker/src/steps/{generateScript,
@@ -611,7 +629,10 @@ function MiniStatusBadge({ status }: { status: string }) {
   )
 }
 
-function ResumeProductionButton({ jobId }: { jobId: string }) {
+function ResumeProductionButton({ jobId, restart = false }: { jobId: string; restart?: boolean }) {
+  // restart: the draft stage itself failed (no script was ever produced), so
+  // there is nothing to resume. POST /video/generate resets the failed pipeline
+  // and starts the draft again; /video/resume would answer 409 here.
   // Self-contained like VideoTrackCard's retry: the resume route flips the
   // pipeline back to 'generating' server-side
   // (src/app/api/jobs/[jobId]/video/resume/route.ts) and this page's own
@@ -623,7 +644,7 @@ function ResumeProductionButton({ jobId }: { jobId: string }) {
     setResuming(true)
     setResumeError(null)
     try {
-      const res = await fetch(`/api/jobs/${jobId}/video/resume`, { method: 'POST' })
+      const res = await fetch(`/api/jobs/${jobId}/video/${restart ? 'generate' : 'resume'}`, { method: 'POST' })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.error ?? `Resume failed (status ${res.status})`)
@@ -639,7 +660,7 @@ function ResumeProductionButton({ jobId }: { jobId: string }) {
     <div className="flex flex-col items-end gap-1">
       <Button variant="outline" size="sm" onClick={handleResume} disabled={resuming}>
         <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${resuming ? 'animate-spin' : ''}`} />
-        {resuming ? 'Resuming…' : 'Resume'}
+        {restart ? (resuming ? 'Retrying…' : 'Retry') : resuming ? 'Resuming…' : 'Resume'}
       </Button>
       {resumeError && <p className="text-xs text-red-600">{resumeError}</p>}
     </div>
@@ -695,6 +716,221 @@ function VideoTrackCard({ jobId, track }: { jobId: string; track: VideoTrackRow 
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// ─── Single-shot approval card (TEST-ONLY, branch test/seedance-single-shot) ───
+// Same gate as the scene pipeline's script approval: read and edit the one Seedance
+// prompt and its spoken lines at draft_ready; nothing paid runs until Approve.
+// POST /video/script re-checks every edit with the same validator the AI draft passed.
+const SINGLE_SHOT_MAX_WORDS = 70
+
+function SingleShotDraftEditor({
+  jobId,
+  draft,
+  editable,
+  onSaved,
+}: {
+  jobId: string
+  draft: SingleShotDraftData
+  editable: boolean
+  onSaved: () => void | Promise<void>
+}) {
+  const savedLines = draft.spoken_lines.map((l) => l.text)
+  const [prompt, setPrompt] = useState(draft.prompt)
+  const [lines, setLines] = useState(savedLines)
+  const savedFrench = draft.french_lines ?? []
+  const [frenchLines, setFrenchLines] = useState(savedFrench)
+  const [tab, setTab] = useState<'EN' | 'FR'>('EN')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Reseed only when the SAVED draft changes (the status poll refetches it continuously
+  // while draft_ready and must not stomp in-progress edits).
+  const savedKey = JSON.stringify([draft.prompt, savedLines, savedFrench])
+  const seededKey = useRef(savedKey)
+  useEffect(() => {
+    if (seededKey.current === savedKey) return
+    seededKey.current = savedKey
+    setPrompt(draft.prompt)
+    setLines(draft.spoken_lines.map((l) => l.text))
+    setFrenchLines(draft.french_lines ?? [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey])
+
+  const promptDirty = prompt.trim() !== draft.prompt
+  const linesDirty = lines.some((t, i) => t.trim() !== savedLines[i])
+  const frenchDirty = frenchLines.some((t, i) => t.trim() !== savedFrench[i])
+  const dirty = promptDirty || linesDirty || frenchDirty
+  const totalWords = lines.reduce((n, t) => n + narrationWordCount(t), 0)
+  const overLimit = totalWords > SINGLE_SHOT_MAX_WORDS
+  const emptyLine = lines.some((t) => !t.trim()) || frenchLines.some((t) => !t.trim())
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/video/script`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(promptDirty ? { prompt } : {}),
+          ...(linesDirty ? { lines } : {}),
+          ...(frenchDirty ? { frenchLines } : {}),
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `Save failed (status ${res.status})`)
+      }
+      await onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const containerLabel: Record<SingleShotDraftData['container_shown'], string> = {
+    none: 'Container not shown',
+    exterior: 'Container: outside view',
+    interior: 'Container: inside view',
+    both: 'Container: outside + inside',
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <Chip label="Mode" value={draft.audio_mode === 'dialogue' ? 'Dialogue (lip-synced)' : 'Voiceover'} />
+        <div className="h-4 w-px bg-gray-300" />
+        <Chip label="Container" value={containerLabel[draft.container_shown].replace('Container: ', '').replace('Container ', '')} />
+        <div className="h-4 w-px bg-gray-300" />
+        <Chip label="Reference photos" value={String(draft.reference_image_urls.length)} />
+        <div className="h-4 w-px bg-gray-300" />
+        <Chip label="Format" value={`30s · ${draft.aspect_ratio} · 480p`} />
+      </div>
+
+      {draft.hook && (
+        <Card>
+          <CardContent className="space-y-1 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Opening hook</p>
+            <p className="text-sm text-gray-700">{draft.hook}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {draft.french_lines && (
+        <div className="flex items-center gap-2">
+          {(['EN', 'FR'] as const).map((t) => (
+            <Button key={t} size="sm" variant={tab === t ? 'default' : 'outline'} onClick={() => setTab(t)}>
+              {t === 'EN' ? 'English (Seedance voice)' : 'Français (new voice, same video)'}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {tab === 'FR' && draft.french_lines ? (
+        <Card>
+          <CardContent className="space-y-3 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">French narration (spoken)</p>
+            {frenchLines.map((text, i) => (
+              <div key={i} className="space-y-1">
+                <label className="block text-xs font-medium text-gray-500">
+                  Ligne {i + 1}
+                  <span className="ml-2 font-normal text-gray-400">
+                    {narrationWordCount(text)} words · English: {narrationWordCount(lines[i] ?? '')}
+                  </span>
+                </label>
+                <p className="text-xs italic text-gray-400">{lines[i]}</p>
+                <Textarea
+                  value={text}
+                  onChange={(e) => setFrenchLines((prev) => prev.map((t, j) => (j === i ? e.target.value : t)))}
+                  rows={2}
+                  disabled={!editable || saving}
+                  className="text-sm"
+                />
+              </div>
+            ))}
+            <p className="text-xs text-gray-400">
+              The English video is generated once. This French voice replaces the English one on the same video, so each line
+              has to fit the time of its English line.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+      <Card>
+        <CardContent className="space-y-3 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              {draft.audio_mode === 'dialogue' ? 'Dialogue (spoken on camera)' : 'Narration script (spoken)'}
+            </p>
+            <p className={`text-xs ${overLimit ? 'font-medium text-red-600' : 'text-gray-400'}`}>
+              {totalWords} / {SINGLE_SHOT_MAX_WORDS} words max
+            </p>
+          </div>
+          {lines.map((text, i) => (
+            <div key={i} className="space-y-1">
+              <label className="block text-xs font-medium text-gray-500">
+                {draft.audio_mode === 'dialogue' ? draft.spoken_lines[i]?.speaker : 'Line'} {i + 1}
+                <span className="ml-2 font-normal text-gray-400">{narrationWordCount(text)} words</span>
+              </label>
+              <Textarea
+                value={text}
+                onChange={(e) => setLines((prev) => prev.map((t, j) => (j === i ? e.target.value : t)))}
+                rows={2}
+                disabled={!editable || saving}
+                className="text-sm"
+              />
+            </div>
+          ))}
+          <p className="text-xs text-gray-400">
+            This is exactly what will be spoken. Changing a line here also updates it inside the video prompt below.
+          </p>
+        </CardContent>
+      </Card>
+      )}
+
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Video prompt (sent to Seedance)</p>
+            <p className="text-xs text-gray-400">{prompt.length} characters</p>
+          </div>
+          <Textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={16}
+            disabled={!editable || saving}
+            className="font-mono text-xs leading-relaxed"
+          />
+          <p className="text-xs text-gray-400">
+            Every spoken line must stay in the prompt word for word. Edits are checked against the same rules as the AI
+            draft (word limit, container doorway, reference photos) when you save.
+          </p>
+        </CardContent>
+      </Card>
+
+      {error && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+            <p className="text-xs text-red-700">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="shrink-0 text-xs text-red-500 hover:text-red-700">✕</button>
+        </div>
+      )}
+
+      {editable && (
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={save} disabled={saving || !dirty || overLimit || emptyLine}>
+            {saving ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-2 h-3.5 w-3.5" />}
+            Save script
+          </Button>
+          <p className="text-xs text-gray-400">
+            Save your edits before approving. Approving starts the paid Seedance render, and the draft locks.
+          </p>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -825,7 +1061,7 @@ function VideoTabContent({
           <div className="flex flex-wrap items-center gap-3">
             <Chip label="Duration" value={draftData.duration_seconds ? `${draftData.duration_seconds}s` : '—'} />
             <div className="h-4 w-px bg-gray-300" />
-            <Chip label="Scenes"   value={String(scenes.length)} />
+            <Chip label="Scenes"   value={draftData.single_shot ? 'Single shot' : String(scenes.length)} />
             <div className="h-4 w-px bg-gray-300" />
             <Chip label="Language" value={job.language} />
           </div>
@@ -853,7 +1089,14 @@ function VideoTabContent({
         </div>
       )}
 
-      {isPreApproval ? (
+      {isPreApproval && draftData?.single_shot ? (
+        <SingleShotDraftEditor
+          jobId={job.id}
+          draft={draftData.single_shot}
+          editable={pipeline.status === 'draft_ready'}
+          onSaved={onScriptSaved}
+        />
+      ) : isPreApproval ? (
         <>
           {(liveScript || draftData?.script) && (
             <Card>
@@ -972,7 +1215,7 @@ function VideoTabContent({
               </div>
               <div className="flex items-center gap-2">
                 {pipeline.status === 'failed' && pipeline.last_error !== 'Cancelled by user' && (
-                  <ResumeProductionButton jobId={job.id} />
+                  <ResumeProductionButton jobId={job.id} restart={!draft && tracks.length === 0} />
                 )}
                 <MiniStatusBadge status={pipeline.status} />
               </div>
@@ -2134,17 +2377,10 @@ export default function JobDetailPage() {
         const preferred = data.find((r) => r.language === preferredLang) ?? data[0]
         setImageResult(preferred as ImagePostResult)
         setImagePolling(false)
-        // image_post has no manual "Approve" click to route through (unlike
-        // blog/video's handleContentApprove/handleVideoApprove, the only
-        // other callers of clearAfterApproval) — this auto-redirect IS its
-        // approval-equivalent moment. Without this call, the "New Content"
-        // page's pending-generation banner (src/stores/newContentStore.ts)
-        // stayed stuck forever for any image_post-only job, since nothing
-        // else ever clears it once the user is bounced straight to the
-        // library instead of landing on an approve screen.
-        clearAfterApproval(job_id)
-        // Auto-redirect to Library images section, highlighted
-        router.push(`/dashboard/library?section=images&highlight=${job_id}`)
+        // No auto-redirect: the image needs its own Approve click (the library
+        // hides an image until its track is approved), and a job with blog/video
+        // alongside it still has those to review. Redirecting here bounced the
+        // user off the job page before any approval screen could be used.
       }
     }
 

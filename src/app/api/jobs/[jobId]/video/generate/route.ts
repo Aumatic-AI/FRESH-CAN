@@ -2,6 +2,7 @@ import { pinJobCredentials } from '@/server/pipeline/credentials'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { inngest } from '@/inngest/client'
+import { env } from '@/server/pipeline/env'
 
 // Same pattern as blog/image's generate routes: prefer the service-role key
 // — the pipeline tables have RLS actually enforced.
@@ -54,6 +55,41 @@ export async function POST(
     .eq('content_type', 'video')
     .maybeSingle()
   if (existing) {
+    // A draft stage that failed for good (retries exhausted -> failJobOnRunFailure
+    // marked the pipeline 'failed') could never be retried: the re-send below
+    // uses a fixed event id that Inngest drops for 24h, and nothing else moves
+    // a failed pipeline back. Restart it here: only when no video draft exists
+    // yet (a failure after approval has its own /video/resume), via a CAS on
+    // 'failed' so a double click can't double-fire, and with an event id that
+    // carries the fresh updated_at so the dedup can't swallow it.
+    if (existing.status === 'failed') {
+      const { data: draft } = await supabase
+        .from('content_drafts')
+        .select('id')
+        .eq('job_id', jobId)
+        .eq('content_type', 'video')
+        .limit(1)
+        .maybeSingle()
+      if (!draft) {
+        const now = new Date().toISOString()
+        const { data: reset } = await supabase
+          .from('content_pipelines')
+          .update({ status: 'created', last_error: null, current_step: null, updated_at: now })
+          .eq('id', existing.id)
+          .eq('status', 'failed')
+          .select()
+          .maybeSingle()
+        if (reset) {
+          await supabase
+            .from('content_jobs')
+            .update({ status: 'pending', updated_at: now })
+            .eq('id', jobId)
+            .eq('status', 'failed')
+          await sendVideoGenerateEvent(existing.id as string, jobId, now)
+          return NextResponse.json({ pipeline: reset, created: false, restarted: true })
+        }
+      }
+    }
     await sendVideoGenerateEvent(existing.id as string, jobId)
     return NextResponse.json({ pipeline: existing, created: false })
   }
@@ -89,9 +125,21 @@ export async function POST(
 // pipeline — a client retry, or the self-heal call above — is deduped by
 // Inngest instead of starting a second concurrent run. Belt-and-suspenders
 // alongside video.ts's own concurrency limit and claimPipeline's CAS.
-async function sendVideoGenerateEvent(pipelineId: string, jobId: string): Promise<void> {
+async function sendVideoGenerateEvent(pipelineId: string, jobId: string, restartedAt?: string): Promise<void> {
+  const idSuffix = restartedAt ? `:${restartedAt}` : ''
+  // TEST-ONLY (branch test/seedance-single-shot): with ENABLE_SINGLE_SHOT_TEST
+  // on, run the single-shot Seedance 2.5 flow instead of the scene pipeline.
+  // Flag off (the default) is exactly the original behaviour.
+  if (env.ENABLE_SINGLE_SHOT_TEST) {
+    await inngest.send({
+      id: `${pipelineId}:single-shot.generate${idSuffix}`,
+      name: 'content/single-shot.generate',
+      data: { pipelineId, jobId },
+    })
+    return
+  }
   await inngest.send({
-    id: `${pipelineId}:video.generate`,
+    id: `${pipelineId}:video.generate${idSuffix}`,
     name: 'content/video.generate',
     data: { pipelineId, jobId },
   })

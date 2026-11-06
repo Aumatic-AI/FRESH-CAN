@@ -24,6 +24,46 @@ function loadLogo(): Buffer {
 // why this replaced both earlier attempts (plain composite, then a flat chip).
 const GRADIENT_PEAK_OPACITY = 0.55
 
+/** The soft black corner fade (top-right) that keeps the logo legible on any background. */
+async function buildCornerGradient(width: number): Promise<{ gradient: Buffer; radius: number }> {
+  const radius = Math.round(width * SAFE_ZONE_RADIUS_FRACTION)
+  // Two stops before the fade-out (rather than one linear ramp) so the
+  // darkness stays close to peak through the whole area the logo actually
+  // sits in, and only tapers away beyond that — a pure linear ramp from the
+  // very corner was measurably too faint by the time it reached the logo's
+  // own position.
+  const gradientSvg = `<svg width="${radius}" height="${radius}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="g" cx="100%" cy="0%" r="100%">
+        <stop offset="0%" stop-color="black" stop-opacity="${GRADIENT_PEAK_OPACITY}"/>
+        <stop offset="40%" stop-color="black" stop-opacity="${GRADIENT_PEAK_OPACITY * 0.85}"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#g)"/>
+  </svg>`
+  const gradient = await sharp(Buffer.from(gradientSvg)).png().toBuffer()
+  return { gradient, radius }
+}
+
+/**
+ * The same logo + corner fade as compositeLogoWatermark, drawn on a transparent full-frame PNG,
+ * so a video can be watermarked identically by overlaying it on every frame (ffmpeg).
+ */
+export async function buildLogoOverlayPng(width: number, height: number): Promise<Buffer> {
+  const logoWidth = Math.round(width * LOGO_WIDTH_FRACTION)
+  const margin = Math.round(width * MARGIN_FRACTION)
+  const resizedLogo = await sharp(loadLogo()).resize({ width: logoWidth }).toBuffer()
+  const { gradient, radius } = await buildCornerGradient(width)
+  return sharp({ create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([
+      { input: gradient, top: 0, left: Math.max(width - radius, 0) },
+      { input: resizedLogo, top: margin, left: Math.max(width - logoWidth - margin, 0) },
+    ])
+    .png()
+    .toBuffer()
+}
+
 /**
  * Composites the real Fresh-CAN logo into the top-right corner of a
  * generated image_post photo. Replaces the old approach of asking the AI
@@ -64,24 +104,7 @@ export async function compositeLogoWatermark(imageBuffer: Buffer): Promise<Buffe
   const margin = Math.round(width * MARGIN_FRACTION)
   const resizedLogo = await sharp(loadLogo()).resize({ width: logoWidth }).toBuffer()
 
-  const radius = Math.round(width * SAFE_ZONE_RADIUS_FRACTION)
-  // Two stops before the fade-out (rather than one linear ramp) so the
-  // darkness stays close to peak through the whole area the logo actually
-  // sits in, and only tapers away beyond that — a pure linear ramp from the
-  // very corner was measurably too faint by the time it reached the logo's
-  // own position.
-  const gradientSvg = `<svg width="${radius}" height="${radius}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <radialGradient id="g" cx="100%" cy="0%" r="100%">
-        <stop offset="0%" stop-color="black" stop-opacity="${GRADIENT_PEAK_OPACITY}"/>
-        <stop offset="40%" stop-color="black" stop-opacity="${GRADIENT_PEAK_OPACITY * 0.85}"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0"/>
-      </radialGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-  </svg>`
-  const gradient = await sharp(Buffer.from(gradientSvg)).png().toBuffer()
-
+  const { gradient, radius } = await buildCornerGradient(width)
   return base
     .composite([
       { input: gradient, top: 0, left: Math.max(width - radius, 0) },

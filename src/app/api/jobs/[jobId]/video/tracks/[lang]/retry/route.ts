@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { inngest } from '@/inngest/client'
+import { readSingleShotDraft } from '@/server/pipeline/steps/singleShot/updateSingleShot'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -78,13 +79,28 @@ export async function POST(
     )
   }
 
+  // TEST-ONLY single-shot flow: only the French track of a BOTH job is retried on its own (it re-runs from
+  // the finished English clip). An English or French-only failure is a failure of the shared render itself.
+  const { data: ssDraftRow } = await supabase
+    .from('content_drafts')
+    .select('draft_data')
+    .eq('content_pipeline_id', pipeline.id)
+    .maybeSingle()
+  const ssDraft = readSingleShotDraft(ssDraftRow?.draft_data)
+  if (ssDraft && !(lang === 'FR' && ssDraft.languages === 'BOTH')) {
+    return NextResponse.json(
+      { error: 'Only the French track of a BOTH single-shot video can be retried here; the shared render has no per-track retry.' },
+      { status: 409 },
+    )
+  }
+
   // Compare-and-swap on status, mirroring src/server/pipeline/db.ts's
   // claimTrack — guards against a concurrent retry click or an in-flight
   // Inngest run racing in.
   const { data: updated, error: uErr } = await supabase
     .from('content_language_tracks')
     .update({
-      status: 'waiting_on_shared',
+      status: ssDraft ? 'created' : 'waiting_on_shared',
       retry_count: 0,
       last_error: null,
       current_step: null,
@@ -121,6 +137,20 @@ export async function POST(
   // The CAS above (not this send) is what prevents a double-fire from a
   // raced concurrent retry click, so updated_at (fresh on every successful
   // CAS) is a safe, simple id suffix here — same reasoning blog's route uses.
+  if (ssDraft) {
+    await supabase
+      .from('content_pipelines')
+      .update({ status: 'generating', last_error: null, updated_at: new Date().toISOString() })
+      .eq('id', pipeline.id)
+      .eq('status', 'failed')
+    await inngest.send({
+      id: `${updated.id}:single-shot.track.fr:retry-${updated.updated_at}`,
+      name: 'content/single-shot.track.fr',
+      data: { pipelineId: pipeline.id, jobId, trackId: updated.id },
+    })
+    return NextResponse.json({ track: updated })
+  }
+
   await inngest.send({
     id: `${updated.id}:video.track.render:retry-${updated.updated_at}`,
     name: 'content/video.track.render',

@@ -68,4 +68,15 @@ export const env = {
   get KIE_FAKE_MODE() {
     return process.env.KIE_FAKE_MODE === 'true'
   },
+  // TEST-ONLY (branch test/seedance-single-shot, default off): when true, the
+  // existing POST /api/jobs/[jobId]/video/generate route starts the
+  // single-shot Seedance 2.5 flow instead of the scene-by-scene pipeline.
+  get ENABLE_SINGLE_SHOT_TEST() {
+    return process.env.ENABLE_SINGLE_SHOT_TEST === 'true'
+  },
+  // KIE model id for the single-shot flow; resolution is pinned to 480p in
+  // adapters/kieSingleShot.ts, not configurable.
+  get SINGLE_SHOT_MODEL() {
+    return process.env.SINGLE_SHOT_MODEL || 'bytedance/seedance-2-5'
+  },
 }

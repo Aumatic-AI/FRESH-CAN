@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { inngest } from '@/inngest/client'
+import { readSingleShotDraft } from '@/server/pipeline/steps/singleShot/updateSingleShot'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -67,6 +68,59 @@ export async function POST(
   }
   if (!pipeline) {
     return NextResponse.json({ error: 'No video pipeline for this job — call /video/generate first' }, { status: 404 })
+  }
+
+  // TEST-ONLY single-shot flow (branch test/seedance-single-shot): the draft holds one
+  // Seedance prompt instead of a scene plan, there are no language tracks to create, and
+  // approval sends the single render event. Scene-pipeline jobs never match this.
+  const { data: ssDraft } = await supabase
+    .from('content_drafts')
+    .select('draft_data')
+    .eq('content_pipeline_id', pipeline.id)
+    .maybeSingle()
+  const ssParsed = readSingleShotDraft(ssDraft?.draft_data)
+  if (ssParsed) {
+    if (pipeline.status === 'created' || pipeline.status === 'drafting') {
+      return NextResponse.json({ error: `Script is not ready yet (pipeline status: ${pipeline.status})` }, { status: 409 })
+    }
+    let claimedPipeline = pipeline
+    let created = false
+    if (pipeline.status === 'draft_ready') {
+      const { data: claimed, error: claimErr } = await supabase
+        .from('content_pipelines')
+        .update({ status: 'approved', updated_at: new Date().toISOString() })
+        .eq('id', pipeline.id)
+        .eq('status', 'draft_ready')
+        .select()
+        .maybeSingle()
+      if (claimErr) return NextResponse.json({ error: claimErr.message }, { status: 500 })
+      if (claimed) {
+        claimedPipeline = claimed
+        created = true
+      }
+    }
+    // One track per language (BOTH = EN + FR). Idempotent: a repeat approve inserts nothing new.
+    const trackLanguages = ssParsed.languages === 'BOTH' ? ['EN', 'FR'] : ssParsed.languages === 'FR' ? ['FR'] : ['EN']
+    const { error: trackErr } = await supabase
+      .from('content_language_tracks')
+      .upsert(
+        trackLanguages.map((language) => ({
+          content_pipeline_id: pipeline.id,
+          language,
+          master_generation_used: pipeline.current_generation,
+        })),
+        { onConflict: 'content_pipeline_id,language', ignoreDuplicates: true },
+      )
+    if (trackErr) return NextResponse.json({ error: trackErr.message }, { status: 500 })
+    const { data: ssTracks } = await supabase.from('content_language_tracks').select('*').eq('content_pipeline_id', pipeline.id)
+
+    // Stable id: a repeat approve (or a lost race) is deduped by Inngest, never a second paid render.
+    await inngest.send({
+      id: `${pipeline.id}:single-shot.render`,
+      name: 'content/single-shot.render',
+      data: { pipelineId: pipeline.id, jobId },
+    })
+    return NextResponse.json({ pipeline: claimedPipeline, tracks: ssTracks ?? [], created })
   }
 
   // Idempotency: already approved (or further along) — return the existing
