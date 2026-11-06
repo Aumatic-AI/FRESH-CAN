@@ -535,6 +535,27 @@ export async function getRecentVideoPlanDrafts(
     .filter((d: unknown): d is Record<string, unknown> => !!d && typeof d === 'object')
 }
 
+/** Output snapshots of the most recent succeeded `stepName` rows (newest first),
+ *  excluding one pipeline, read by creativeTwist.ts so a new image avoids repeating
+ *  recent concepts. Best-effort: callers treat any error as "no recent data". */
+export async function getRecentStepOutputs(
+  client: SupabaseClient,
+  stepName: string,
+  excludePipelineId: string,
+  limit = 6,
+): Promise<unknown[]> {
+  const { data, error } = await client
+    .from('pipeline_steps')
+    .select('output_snapshot')
+    .eq('step_name', stepName)
+    .eq('status', 'succeeded')
+    .neq('content_pipeline_id', excludePipelineId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []).map((r: { output_snapshot: unknown }) => r.output_snapshot).filter((o: unknown) => !!o)
+}
+
 /**
  * How many failed_retryable attempts of `stepName` at `generation` carry an
  * error_message starting with `prefix` — used by generateSceneVisual.ts to

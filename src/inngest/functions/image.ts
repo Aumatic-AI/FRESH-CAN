@@ -19,6 +19,7 @@ import {
   type TrackRow,
 } from '../../server/pipeline/db'
 import { interpretIntent } from '../../server/pipeline/steps/shared/interpretIntent'
+import { generateCreativeTwist, normalizeCreativeTwist } from '../../server/pipeline/steps/shared/creativeTwist'
 import { planImage } from '../../server/pipeline/steps/image/planImage'
 import { runGenerateAdCopy, type AdCopyJobInput } from '../../server/pipeline/steps/image/generateAdCopy'
 import { runGeneratePhoto } from '../../server/pipeline/steps/image/generatePhoto'
@@ -220,11 +221,22 @@ export const imageGenerate = inngest.createFunction(
       )
       // Layer 2 (PROMPT_REFACTOR_BRIEF.md §4.3) — image_post's first
       // planning step, now feeds composePhotoPrompt below (Phase 4).
+      // Creative twist (distinct visual concept), runs before the plan so the
+      // plan call is cached with the twist already decided; fails open.
+      const twistFirst = await step.run('creative-twist', () =>
+        generateCreativeTwist(client, { contentPipelineId: pipelineId }, pipeline.current_generation, scriptGenerator, BRAND_PROFILE, creativeBrief, {
+          contentType: 'image_post',
+          topic: job.topic,
+          category: job.category,
+          sceneNotes: photoScene(job),
+        }),
+      )
       await step.run('plan-image', () =>
         planImage(client, { contentPipelineId: pipelineId }, pipeline.current_generation, scriptGenerator, BRAND_PROFILE, {
           imageStyle,
           scene: photoScene(job),
           creativeBrief,
+          twist: twistFirst?.visual,
         }),
       )
     }
@@ -255,10 +267,16 @@ export const imageGenerate = inngest.createFunction(
       // Re-derives (idempotently — plan-image already ran above) rather
       // than threading a variable across the two status-gated blocks, same
       // pattern this file already uses for re-fetching `job` in spirit.
+      const twist = await step.run('fetch-creative-twist', async () =>
+        normalizeCreativeTwist(
+          await getLastSucceededStepOutput(client, { contentPipelineId: pipelineId }, 'creative_twist', pipeline.current_generation),
+        ),
+      )
       const imagePostPlan = await step.run('plan-image-for-photo', () =>
         planImage(client, { contentPipelineId: pipelineId }, pipeline.current_generation, scriptGenerator, BRAND_PROFILE, {
           imageStyle,
           scene: photoScene(job),
+          twist: twist?.visual,
         }),
       )
       const photo = composePhotoPrompt(BRAND_PROFILE, {
@@ -271,6 +289,7 @@ export const imageGenerate = inngest.createFunction(
         setting: imagePostPlan.setting,
         containsFood: imagePostPlan.containsFood,
         castDescription: imagePostPlan.castDescription,
+        twist: twist?.visual,
         ...styleInputs,
       })
       pipeline = await runPhotoUntilSettled(

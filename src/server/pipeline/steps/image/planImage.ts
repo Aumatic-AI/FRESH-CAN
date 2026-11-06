@@ -10,6 +10,8 @@ export interface PlanImageInput {
    *  image.ts's photoScene(). */
   scene: string
   creativeBrief?: CreativeBrief
+  /** creativeTwist.ts `visual`, the chosen concept the plan must realise. */
+  twist?: string
 }
 
 /** Returned when planning fails or returns malformed JSON — a minimal,
@@ -108,7 +110,7 @@ export async function planImage(
 
   try {
     const result = await scriptGenerator.generate({
-      systemPrompt: composeImagePlanSystemPrompt(brand, { imageStyle: input.imageStyle, scene: input.scene }, input.creativeBrief),
+      systemPrompt: composeImagePlanSystemPrompt(brand, { imageStyle: input.imageStyle, scene: input.scene, twist: input.twist }, input.creativeBrief),
       userPrompt: `Scene: ${input.scene}\nImage style: ${input.imageStyle}`,
       stepName: 'plan_image',
     })

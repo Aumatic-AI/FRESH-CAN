@@ -36,6 +36,7 @@ export {
 export {
   composeIntentSystemPrompt,
   composeImagePlanSystemPrompt,
+  composeCreativeTwistSystemPrompt,
   composeOutlineSystemPrompt,
   composeReferenceCopySystemPrompt,
   composeCopySystemPrompt,
@@ -45,6 +46,7 @@ export {
   composeLocalizeScriptSystemPrompt,
   composeNarrationReviewSystemPrompt,
   type ImagePlanSystemPromptOptions,
+  type CreativeTwistSystemPromptOptions,
   type ReferenceCopySystemPromptOptions,
   type CopySystemPromptOptions,
   type CaptionSystemPromptOptions,

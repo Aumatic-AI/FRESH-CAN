@@ -902,3 +902,13 @@ describe('Part A: scene variation and freshness across videos', () => {
     expect(composeVideoScriptSystemPrompt(testBrand, opts)).not.toContain('Recent videos already told')
   })
 })
+
+import { BLOG_IDEA_IS_SUBJECT_NOT_FORMAT, composeOutlineSystemPrompt as _outline } from './composeText'
+import { BRAND_PROFILE as _BRAND } from '../brand/fresh-can'
+describe('blog treats the idea as subject, not format', () => {
+  it('outline prompt carries the rule when a scene idea is given, and not otherwise', () => {
+    const idea = 'The camera follows a strawberry with match cuts'
+    expect(_outline(_BRAND, 'How FreshCAN Works', idea)).toContain(BLOG_IDEA_IS_SUBJECT_NOT_FORMAT)
+    expect(_outline(_BRAND, 'How FreshCAN Works', null)).not.toContain(BLOG_IDEA_IS_SUBJECT_NOT_FORMAT)
+  })
+})

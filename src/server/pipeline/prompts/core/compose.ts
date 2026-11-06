@@ -51,6 +51,14 @@ interface StyleInputs {
   subtitle?: string
 }
 
+/** Creative-twist concept folded in as the visual direction. The scene idea stays the message. */
+function twistClause(twist: string | undefined): string {
+  return twist
+    ? `Creative visual concept for this image, a fresh take that still serves the same idea above: ${twist} ` +
+        'Avoid the default stock look of smiling shoppers holding baskets of produce unless the idea above explicitly asks for it.'
+    : ''
+}
+
 interface BlogImageJob extends StyleInputs {
   pipelineId: string
   topic: string
@@ -79,6 +87,8 @@ interface BlogImageJob extends StyleInputs {
     coreMessage: string
     inlineHighlight: { heading: string; visualMoment: string }
   }
+  /** creativeTwist.ts output: `visual` for hero, `secondaryVisual` for inline. */
+  twist?: { visual: string; secondaryVisual: string }
 }
 
 interface PhotoJob extends StyleInputs {
@@ -109,6 +119,8 @@ interface PhotoJob extends StyleInputs {
    *  present, the same "constraint/grounding, never the point" treatment
    *  every other plan field gets. */
   castDescription?: string
+  /** creativeTwist.ts `visual` for this image. */
+  twist?: string
 }
 
 // A single neutral default — not a rotating list of canned moods. Until
@@ -687,6 +699,8 @@ function composeBlogImage(
         `"${job.sceneNotes}". ${SCENE_IS_CREATIVE_BRIEF}`,
     )
   }
+  const blogTwist = kind === 'hero' ? job.twist?.visual : job.twist?.secondaryVisual || job.twist?.visual
+  if (blogTwist) parts.push(twistClause(blogTwist))
   let referenceImageUrl: string | undefined
 
   if (showSubject) {
@@ -1662,6 +1676,7 @@ export function composePhotoPrompt(brand: BrandProfile, job: PhotoJob): ImageCom
     PHOTOREALISTIC_QUALITY_FLOOR,
     containsFood ? FOOD_MUST_LOOK_CLEAN : '',
     job.castDescription ? `The people in this scene: ${job.castDescription}.` : '',
+    twistClause(job.twist),
   ]
   let referenceImageUrl: string | undefined
   if (showSubject) {

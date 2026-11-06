@@ -20,6 +20,7 @@ import {
   type PipelineRow,
   type TrackRow,
 } from '../../server/pipeline/db'
+import { generateCreativeTwist } from '../../server/pipeline/steps/shared/creativeTwist'
 import { interpretIntent } from '../../server/pipeline/steps/shared/interpretIntent'
 import { runGenerateOutline, type OutlineJobInput } from '../../server/pipeline/steps/blog/generateOutline'
 import { generateReferenceCopy, type OutlineSection } from '../../server/pipeline/steps/blog/generateReferenceCopy'
@@ -300,6 +301,15 @@ export const blogGenerate = inngest.createFunction(
           { title: outlineTitle, sections: outlineSections },
         ),
       )
+      // Creative twist, distinct concepts for hero and inline; fails open (null).
+      const twist = await step.run('creative-twist', () =>
+        generateCreativeTwist(client, { contentPipelineId: pipelineId }, pipeline.current_generation, scriptGenerator, BRAND_PROFILE, creativeBrief, {
+          contentType: 'blog',
+          topic: job.topic,
+          category: job.category,
+          sceneNotes: job.scene_notes,
+        }),
+      )
       const blogImageJob = {
         pipelineId,
         topic: job.topic,
@@ -310,6 +320,7 @@ export const blogGenerate = inngest.createFunction(
         sceneNotes: job.scene_notes,
         unitPresence: mapUnitRelevanceToPresence(creativeBrief.unitRelevance.value),
         referenceCopy,
+        twist: twist ?? undefined,
       }
       const hero = composeHeroPrompt(BRAND_PROFILE, blogImageJob)
       const inline = composeInlinePrompt(BRAND_PROFILE, blogImageJob)

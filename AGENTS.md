@@ -11,32 +11,31 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 # Fresh-CAN Engineering Rules
 
 ## Architecture boundaries
-- New pipeline-owned state (jobs/pipelines/tracks/drafts/generated content for Blog) is written only through a backend API route — never directly from a component via the anon Supabase client.
-- The backend API is the only caller of the job/pipeline queue. Workers are the only thing that calls external providers (OpenAI, KIE.ai, etc.) directly.
-- n8n remains the executor for Video and Image, unchanged, until those pipelines are explicitly migrated. Don't route Video/Image traffic through the new worker, and don't retrofit Video/Image's existing direct-write pattern just because Blog is moving off it.
+- All four content types (blog, image_post, video, social) run on Inngest: functions in `src/inngest/functions/`, step/adapter/db logic in `src/server/pipeline/`, served from `src/app/api/inngest/route.ts`. n8n is fully retired and the old polling `worker/` is removed. `npm run dev` at the repo root is the only process to start.
+- Pipeline-owned state (jobs/pipelines/tracks/drafts/generated content) is written only through a backend API route (`src/app/api/jobs/[jobId]/...`, `src/app/api/social/post/`) — never directly from a component via the anon Supabase client.
+- API routes create/update rows and send an Inngest event; there is no queue or polling loop. Only Inngest functions (via `src/server/pipeline/adapters/`) call external providers (OpenAI, KIE.ai, ElevenLabs, AssemblyAI, upload-post.com) directly.
+- Prompts are layered (brand truth → intent → per-type plan → render prompt → guards); see `docs/PROMPT_ARCHITECTURE.md` before changing prompt code. Image-bearing types (image_post, blog) also run a creative-twist step (`steps/shared/creativeTwist.ts`).
 
 ## Database safety
 - Never assume a table, column, or constraint exists — check `docs/DATABASE_DESIGN.md` and, where it matters, the live schema before writing a query. (This codebase has one confirmed live case of code silently drifting from the real constraint — see `docs/DECISIONS.md`.)
-- Migrations are additive only while Video/Image still depend on the current shape of `content_drafts`, `generated_content`, `content_jobs`, `social_posts`, `social_platform_logs`: no dropped or renamed columns on these tables until Video/Image are themselves migrated.
+- Migrations are additive only: no dropped or renamed columns on `content_drafts`, `generated_content`, `content_jobs`, `social_posts`, `social_platform_logs` without explicit sign-off.
 - A schema change isn't written until it's reflected in `docs/DATABASE_DESIGN.md`'s current → target mapping.
 
 ## API / backend ownership
-- New pipeline-owned mutations (job/pipeline/track state, draft edits, approvals, regeneration, retry) get a dedicated backend API route — they are not added to `contentService.ts` as another direct-client-call function.
-- `contentService.ts` stays the read path for existing Video/Image/Library UI and for the legacy columns Blog also denormalizes into; it does not become the write path for new pipeline-owned tables.
+- Pipeline-owned mutations (job/pipeline/track state, draft edits, approvals, regeneration, retry) get a dedicated backend API route — they are not added to `contentService.ts` as another direct-client-call function.
+- `contentService.ts` holds the UI's Supabase calls (read path); it is not the write path for pipeline-owned tables. New endpoints are documented in `API_DOCS.md`.
 
 ## Idempotency
-- Every new mutating endpoint and every worker step handler must be safe to call twice: check for an existing successful record for the same (pipeline or track, step, generation) before doing provider work or writing a result.
+- Every new mutating endpoint and every Inngest step handler must be safe to call twice: check for an existing successful record for the same (pipeline or track, step, generation) before doing provider work or writing a result.
 - Before adding any new `upsert`, confirm its `onConflict` target matches a real live unique constraint — this exact class of bug already exists once in this codebase.
 
 ## Testing
-- The main Next.js app still has no automated test suite — verification there is `npx tsc --noEmit` plus manual exercise via the dev server. Don't introduce a test framework for it as a side effect of unrelated work.
-- `worker/` (the Blog worker package) has its own Vitest suite (`cd worker && npm test`), added when the worker itself was built — because the task explicitly required unit/integration tests, not incidentally. Pure logic (state machines, backoff/retry calculation, provider adapters against a mocked `fetch`) is unit-tested and must actually pass, not just typecheck. DB-touching code gets integration tests gated on `DATABASE_URL` (`describe.skipIf(!process.env.DATABASE_URL)`) rather than assumed to work — never claim a DB-dependent test "passed" when it only skipped.
-- For Blog's new async flow specifically, verification covers the full API → worker → DB round trip for both language tracks independently, not just the EN happy path, once `DATABASE_URL` is actually available.
-- Run `npx tsc --noEmit` (root) and `cd worker && npm test && npx tsc -p tsconfig.json --noEmit` after any change touching either — both are cheap and catch regressions immediately.
+- Verification is `npx tsc --noEmit` plus Vitest on the specific files you touched. Run unit tests by file path, never a whole folder: e2e tests (`*.e2e.test.ts`) write real rows to the live Supabase DB.
+- Pure logic (prompt composers, normalizers, backoff, adapters against a mocked `fetch`) is unit-tested and must actually pass, not just typecheck. DB-touching tests are gated on credentials; never claim one "passed" when it only skipped.
+- Never run paid provider calls (KIE, OpenAI image, ElevenLabs) without confirming count and cost first. Use `KIE_FAKE_MODE` for pipeline runs that don't need real renders.
 
-## Incremental migration
-- Blog is the only pipeline being built on the new architecture right now. Video and Image are not touched, refactored, or migrated as part of this work, even opportunistically.
-- Each phase in `docs/IMPLEMENTATION_PLAN.md` ships independently verifiable — don't build ahead into a later milestone because it's convenient.
+## Scope
+- Keep changes scoped to what the task names; don't build ahead or refactor opportunistically.
 
 ## Avoiding unrelated changes
 - Don't fix pre-existing issues noticed in passing (e.g. the `twitter`/`x` enum duplication, the unused `job_overview` view, the `video_url` column question) unless asked — note them in `docs/DECISIONS.md` or flag them, don't silently touch them.
@@ -44,3 +43,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Docs stay in sync
 - A change that alters pipeline/job/status/track behavior updates the relevant doc (`SPECIFICATIONS.md`, `ARCHITECTURE.MD`, `docs/DATABASE_DESIGN.md`, `docs/DECISIONS.md`) in the same change, not after.
+
+## Keeping agent docs in sync
+- `AGENTS.md` (other coding agents) and `CLAUDE.md` (Claude Code) describe the same project. A change to architecture, stack, commands or rules updates BOTH in the same change. Leave the auto-generated `nextjs-agent-rules` block at the top of this file as is.

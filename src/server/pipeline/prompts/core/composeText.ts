@@ -178,6 +178,73 @@ export function composeIntentSystemPrompt(brand: BrandProfile, contentType: stri
   )
 }
 
+export interface CreativeTwistSystemPromptOptions {
+  /** 'image_post' needs one concept; 'blog' also needs a second, different-axis one for the inline image. */
+  contentType: 'image_post' | 'blog'
+  /** Short descriptions of recently generated images' concepts (newest first). */
+  recent: string[]
+  /** Deterministic suggestion from the rotation, a starting axis, not a mandate. */
+  suggestedAxis: string
+}
+
+/**
+ * Creative twist pass: turns a thin or literal idea into a distinct visual
+ * concept before the image plan/prompt is composed. Fights the "smiling
+ * shopper holding a basket of produce" default the brand facts pull every
+ * image toward.
+ */
+export function composeCreativeTwistSystemPrompt(
+  brand: BrandProfile,
+  opts: CreativeTwistSystemPromptOptions,
+  creativeBrief: CreativeBrief,
+): string {
+  const negativesLine =
+    brand.businessModelNegatives.length > 0 || brand.forbiddenInScene.length > 0
+      ? ` ${[...brand.businessModelNegatives, ...brand.forbiddenInScene].join(' ')}`
+      : ''
+  const recentLine =
+    opts.recent.length > 0
+      ? `\n\nRecently generated images already used these concepts, do NOT repeat or closely echo them: ` +
+        `${opts.recent.map((r, i) => `(${i + 1}) ${r}`).join(' ')}`
+      : ''
+  const secondary =
+    opts.contentType === 'blog'
+      ? '"secondaryVisual": string (a second concept for the article\'s inline image, on a DIFFERENT axis from "visual" and showing a different moment, same core message)'
+      : '"secondaryVisual": "" (always empty for this content type)'
+
+  return (
+    `${brand.missionStatement}${negativesLine} ${NO_ENTRY_EXIT_RULE}\n\n` +
+    'You are the creative director choosing the visual concept for an image before it is planned or rendered. ' +
+    `${creativeBriefContext(creativeBrief)}\n\n` +
+    'The brand facts above are correctness constraints, never the visual. Left alone, image generation drifts ' +
+    'to the same default: smiling people holding baskets of fresh produce, shoppers offering food to camera, ' +
+    'a crowd at a unit, a flat-lay of vegetables. AVOID those defaults unless the admin\'s idea explicitly asks ' +
+    'for them.\n\n' +
+    'Give the idea a creative twist: a fresh, specific, non-obvious way to show the SAME idea. The twist changes ' +
+    'the visual treatment only, never the message. Anything the admin stated explicitly stays binding and must ' +
+    'survive unchanged. If the admin\'s idea is already highly specific and original, keep it and refine rather ' +
+    'than replace it.\n\n' +
+    'Choose ONE axis to make it different: hands-only or detail close-up; object still-life or a single telling ' +
+    'object; environment or place with no people; a single person in a story moment (not holding a basket); ' +
+    'aerial, macro or unusual vantage; a visual metaphor; a distinct time of day, season or weather; a ' +
+    'different SETTING (an outdoor market, a roadside, a school, a workplace, a community hall, a farm or ' +
+    'harvest field, a rural or remote community; not another home kitchen or living room); a ' +
+    `distinct colour story. Suggested starting axis (override if another fits the idea better): ${opts.suggestedAxis}. ` +
+    'People are optional, only include them if they improve the idea. Be concrete: name the subject, the ' +
+    'vantage and what makes it surprising. Photographable only, no text on image, no invented facts. ' +
+    'Vary the WHERE as well as the framing: unless the idea is explicitly about the home, do not default to a ' +
+    'family at a kitchen table. Also vary the props and foods: do not reuse the same items (apples, carrots, ' +
+    'cucumber, berries, sandwiches) that recent concepts already used.' +
+    recentLine +
+    '\n\nRespond with strictly valid JSON matching this exact shape:\n' +
+    '{\n' +
+    '  "axis": string (the axis you chose, 2-4 words),\n' +
+    '  "visual": string (the concept, one or two concrete sentences),\n' +
+    `  ${secondary}\n` +
+    '}'
+  )
+}
+
 export interface ImagePlanSystemPromptOptions {
   imageStyle: ImageStyle
   /** The dashboard's "Your Scene Idea" plus any clarifying-question answers
@@ -185,6 +252,8 @@ export interface ImagePlanSystemPromptOptions {
    *  (see image.ts's photoScene()). This is the creative brief the plan is
    *  built around, never a light influence. */
   scene: string
+  /** creativeTwist.ts concept: the plan's subject/composition/cast realise this. */
+  twist?: string
 }
 
 /**
@@ -219,6 +288,10 @@ export function composeImagePlanSystemPrompt(
     'they appear — never the reason this image exists, and never a directive on style, mood, or composition, ' +
     "which stay entirely up to the scene above." +
     (creativeBrief ? `\n\n${creativeBriefContext(creativeBrief)}` : '') +
+    (opts.twist
+      ? `\n\nA creative-direction pass already chose this visual concept; the subject, composition and cast ` +
+        `must realise it (it serves the same idea, never replaces the admin's stated constraints): ${opts.twist}`
+      : '') +
     '\n\nDecide honestly whether the brand\'s physical unit (the mobile grocery store) belongs in this frame: ' +
     '"featured" only if the scene above is genuinely about the unit itself (visiting, entering, shopping in, ' +
     'or the unit\'s own arrival/existence); "background" if it could plausibly and unobtrusively belong in the ' +
@@ -234,13 +307,26 @@ export function composeImagePlanSystemPrompt(
     '  "unitPresenceRationale": string (one sentence, honest and specific to this image, never boilerplate),\n' +
     '  "setting": "exterior" | "interior" | "unrelated",\n' +
     '  "containsFood": boolean,\n' +
-    '  "castDescription": string ("" if no people are in the scene),\n' +
+    '  "castDescription": string ("" if no people are in the scene; people are optional, hands, objects and places are equally valid, include people only if they improve the idea),\n' +
     `  "textPlan": { "headline": string, "subtitle": string } or null (${textPlanInstruction}),\n` +
     '  "safeZone": "top-right" (fixed — the logo watermark is composited there after generation; keep that ' +
     'corner visually clean in the composition above — no text, no face, no high-detail clutter there)\n' +
     '}'
   )
 }
+
+/**
+ * The dashboard's single "Your Scene Idea" field feeds blog, image and video
+ * alike, so it is often written as a video or photo brief (camera moves, match
+ * cuts, "the film", shots, captions). A blog must take only the idea's SUBJECT
+ * and message and explain it to a reader. Without this, job 6daa6b34's blog
+ * came out as a narrated description of the film.
+ */
+export const BLOG_IDEA_IS_SUBJECT_NOT_FORMAT =
+  'The idea may be written for another medium (a video, film, photo, shot list or storyboard: camera moves, ' +
+  'cuts, transitions, shots, scenes, captions, voiceover). Take only its SUBJECT and message and write a real ' +
+  'blog article that explains it to a reader. Never describe or mention a film, video, clip, shot, camera, cut, ' +
+  'scene, caption or storyboard, and never narrate how the idea would be filmed.'
 
 export function composeOutlineSystemPrompt(
   brand: BrandProfile,
@@ -271,7 +357,8 @@ export function composeOutlineSystemPrompt(
     (sceneNotes
       ? `\n\nBuild this outline around the user's own creative idea for the post: "${sceneNotes}". Treat the ` +
         'brand mission, voice, and category guidance above as fixed constraints on tone and accuracy — ' +
-        'never as the angle itself. The scene idea decides what this post is actually about.' +
+        'never as the angle itself. The scene idea decides what this post is actually about. ' +
+        BLOG_IDEA_IS_SUBJECT_NOT_FORMAT +
         (creativeBrief ? `\n\n${creativeBriefContext(creativeBrief)}` : '')
       : '')
   )
@@ -372,7 +459,8 @@ export function composeCopySystemPrompt(brand: BrandProfile, opts: CopySystemPro
     (opts.sceneNotes
       ? `\n\nThe copy must stay true to the user's own creative idea for this post: "${opts.sceneNotes}". The ` +
         'brand mission and voice guidance above is a fixed constraint on tone and accuracy, never the angle — ' +
-        'follow the outline\'s sections above, which were already built around this same idea.'
+        'follow the outline\'s sections above, which were already built around this same idea. ' +
+        BLOG_IDEA_IS_SUBJECT_NOT_FORMAT
       : '')
   )
 }

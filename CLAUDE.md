@@ -162,6 +162,15 @@ single-process safety the old worker's tick loop relied on. See
 There is no standalone worker process anymore — `npm run dev` at the repo
 root is the only thing to start.
 
+## 🎨 CREATIVE TWIST (image_post + blog images)
+
+`src/server/pipeline/steps/shared/creativeTwist.ts` (step `creative_twist`, fails
+open) runs after intent interpretation and picks a distinct visual concept per
+job (avoiding the last 6 concepts, with a rotating suggested axis). image_post
+feeds it to `planImage` + `composePhotoPrompt`; blog hero uses `visual`, inline
+uses `secondaryVisual`. Video is not twisted. Aim: stop every image defaulting to
+"people holding baskets of food".
+
 ## ✍️ PROMPT ARCHITECTURE (Layer 0-4)
 
 Every prompt/generation-guiding step across blog/image_post/video is
@@ -215,3 +224,4 @@ npx tsc --noEmit     # TypeScript check
 4. New endpoint: add to `API_DOCS.md`
 5. Never change tech stack without asking
 6. End of session: ✅ done · 🔄 in progress · ⭐ next steps
+7. `AGENTS.md` and `CLAUDE.md` must stay in sync: when architecture, stack, commands or rules change, update both in the same change. `AGENTS.md` carries the engineering rules (boundaries, DB safety, idempotency, testing) for other coding agents.

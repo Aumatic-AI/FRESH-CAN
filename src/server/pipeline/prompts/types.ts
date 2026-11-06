@@ -172,6 +172,21 @@ export interface ImagePostPlan {
 }
 
 /**
+ * Creative twist — one LLM pass (steps/shared/creativeTwist.ts) that picks a
+ * distinct, non-default visual concept for an image-bearing content type
+ * (image_post, blog hero/inline). Serves the same coreMessage and honours the
+ * admin's constraints; only the visual treatment changes.
+ */
+export interface CreativeTwist {
+  /** Visual axis the concept lives on, e.g. 'hands-only', 'still-life', 'metaphor'. */
+  axis: string
+  /** The concept for the main image (image_post, blog hero), one or two sentences. */
+  visual: string
+  /** A different-axis concept for a second image from the same job (blog inline). */
+  secondaryVisual: string
+}
+
+/**
  * Layer 1 (PROMPT_REFACTOR_BRIEF.md §4.2) — the admin's raw idea, interpreted
  * into a structured brief. Produced once per pipeline generation by
  * `steps/shared/interpretIntent.ts`, shared by all three content types.
