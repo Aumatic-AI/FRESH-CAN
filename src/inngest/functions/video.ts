@@ -71,6 +71,7 @@ import { ElevenLabsVoiceSynthesizer } from '../../server/pipeline/adapters/eleve
 import { AssemblyAITranscriptionService } from '../../server/pipeline/adapters/assemblyai'
 import { UploadPostAVMerger } from '../../server/pipeline/adapters/avMerger'
 import { BRAND_PROFILE, composeCharacterRefPrompt, type CreativeBrief } from '../../server/pipeline/prompts/index'
+import { getDraftKind } from '../../server/pipeline/steps/singleShot/runState'
 import { env } from '../../server/pipeline/env'
 import { getApiKey } from '../../server/pipeline/credentials'
 import { failJobOnRunFailure } from '../runFailure'
@@ -194,6 +195,10 @@ export const videoGenerate = inngest.createFunction(
   },
   async ({ event, step }) => {
     const { pipelineId, jobId } = event.data as { pipelineId: string; jobId: string }
+    // A stray legacy event must never rewrite a pipeline that already holds a single-shot draft.
+    if ((await step.run('skip-if-single-shot', () => getDraftKind(client, pipelineId))) === 'single_shot') {
+      return { status: 'skipped', reason: 'single-shot pipeline' }
+    }
     const scriptGenerator = new OpenAIScriptGenerator(await getApiKey('openai', { jobId }))
 
     const job = await step.run('fetch-job', () => fetchVideoJobFields(jobId))
@@ -386,6 +391,11 @@ export const videoApprove = inngest.createFunction(
   async ({ event, step }) => {
     const { pipelineId, jobId } = event.data as { pipelineId: string; jobId: string }
 
+    // Single-shot pipelines are rendered by single-shot-render; never run the scene pipeline on one.
+    if ((await step.run('skip-if-single-shot', () => getDraftKind(client, pipelineId))) === 'single_shot') {
+      return { status: 'skipped', reason: 'single-shot pipeline' }
+    }
+
     const pipeline = await step.run('fetch-pipeline', () => fetchPipeline(pipelineId))
     if (pipeline.status !== 'approved' && pipeline.status !== 'generating') {
       return { status: pipeline.status }
@@ -460,6 +470,9 @@ export const videoTrackRender = inngest.createFunction(
       trackId: string
       pipelineId: string
       jobId: string
+    }
+    if ((await step.run('skip-if-single-shot', () => getDraftKind(client, pipelineId))) === 'single_shot') {
+      return { status: 'skipped', reason: 'single-shot pipeline' }
     }
     const scriptGenerator = new OpenAIScriptGenerator(await getApiKey('openai', { jobId }))
     const voiceSynthesizer = new ElevenLabsVoiceSynthesizer(await getApiKey('elevenlabs', { jobId }))

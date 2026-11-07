@@ -100,6 +100,19 @@ export async function POST(
       }
     }
     // One track per language (BOTH = EN + FR). Idempotent: a repeat approve inserts nothing new.
+    // A repeat approval must never start a second paid render: only a pipeline that is (now) approved or
+    // already generating may (re)send the render event, and the render function itself skips anything
+    // that is not approved/generating. Failed/cancelled videos recover through /video/resume.
+    if (pipeline.status === 'failed') {
+      return NextResponse.json(
+        { error: 'This video failed or was cancelled. Use Resume/Retry to run it again.' },
+        { status: 409 },
+      )
+    }
+    if (pipeline.status === 'ready') {
+      const { data: doneTracks } = await supabase.from('content_language_tracks').select('*').eq('content_pipeline_id', pipeline.id)
+      return NextResponse.json({ pipeline, tracks: doneTracks ?? [], created: false })
+    }
     const trackLanguages = ssParsed.languages === 'BOTH' ? ['EN', 'FR'] : ssParsed.languages === 'FR' ? ['FR'] : ['EN']
     const { error: trackErr } = await supabase
       .from('content_language_tracks')

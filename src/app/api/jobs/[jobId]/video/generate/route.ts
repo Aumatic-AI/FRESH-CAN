@@ -127,10 +127,9 @@ export async function POST(
 // alongside video.ts's own concurrency limit and claimPipeline's CAS.
 async function sendVideoGenerateEvent(pipelineId: string, jobId: string, restartedAt?: string): Promise<void> {
   const idSuffix = restartedAt ? `:${restartedAt}` : ''
-  // TEST-ONLY (branch test/seedance-single-shot): with ENABLE_SINGLE_SHOT_TEST
-  // on, run the single-shot Seedance 2.5 flow instead of the scene pipeline.
-  // Flag off (the default) is exactly the original behaviour.
-  if (env.ENABLE_SINGLE_SHOT_TEST) {
+  // Single-shot Seedance 2.5 is the default video flow; ENABLE_SINGLE_SHOT=false
+  // falls back to the scene-by-scene pipeline.
+  if (env.ENABLE_SINGLE_SHOT) {
     await inngest.send({
       id: `${pipelineId}:single-shot.generate${idSuffix}`,
       name: 'content/single-shot.generate',

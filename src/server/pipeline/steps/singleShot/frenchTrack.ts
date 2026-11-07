@@ -24,6 +24,8 @@ import { estimateLineStarts } from '../../lib/lineTiming'
 import { SINGLE_SHOT_RESOLUTION } from '../../adapters/kieSingleShot'
 import { SINGLE_SHOT_DURATION_SECONDS } from '../../prompts/singleShot'
 import { markJobReadyIfAllContentComplete, upsertVideoGeneratedContent } from '../../db'
+import { CANCELLED_MESSAGE, RUNNING_PIPELINE_STATUSES, getTrackStatus, isPipelineStopped, getPipelineStatus } from './runState'
+import { SingleShotStoppedError } from './generateSingleShot'
 
 const execFileAsync = promisify(execFile)
 const FFMPEG_TIMEOUT_MS = 180_000
@@ -166,6 +168,10 @@ async function finalizeFrenchTrack(
   warnings: string[],
   background: 'separated' | 'none',
 ): Promise<void> {
+  // Never finalize a track whose run was cancelled or failed underneath us.
+  if (isPipelineStopped(await getPipelineStatus(client, a.pipelineId)) || (await getTrackStatus(client, a.trackId)) === 'failed') {
+    throw new SingleShotStoppedError()
+  }
   await upsertVideoGeneratedContent(client, {
     jobId: a.jobId,
     language: 'FR',
@@ -187,6 +193,8 @@ async function finalizeFrenchTrack(
         timing_source: a.timingSource,
         warnings,
         resolution: SINGLE_SHOT_RESOLUTION,
+        // duration_sec is the key the library, dashboard and notifications read.
+        duration_sec: SINGLE_SHOT_DURATION_SECONDS,
         duration_seconds: SINGLE_SHOT_DURATION_SECONDS,
         aspect_ratio: a.aspectRatio,
         original_idea: a.originalIdea,
@@ -202,16 +210,30 @@ async function finalizeFrenchTrack(
     .eq('content_language_track_id', a.trackId)
   if (markErr) throw markErr
 
+  // Compare-and-swap on the track: only a still-generating track becomes ready. If a cancel landed after
+  // the check above, remove the row this call wrote and stop.
   const now = new Date().toISOString()
-  const { error: trackErr } = await client
+  const { data: tracked, error: trackErr } = await client
     .from('content_language_tracks')
     .update({ status: 'ready', current_step: null, updated_at: now })
     .eq('id', a.trackId)
+    .in('status', ['created', 'waiting_on_shared', 'generating', 'ready'])
+    .select('id')
+    .maybeSingle()
   if (trackErr) throw trackErr
+  if (!tracked) {
+    await client.from('generated_content').delete().eq('content_language_track_id', a.trackId)
+    await client
+      .from('content_language_tracks')
+      .update({ status: 'failed', last_error: CANCELLED_MESSAGE, updated_at: now })
+      .eq('id', a.trackId)
+    throw new SingleShotStoppedError()
+  }
   const { error: pipeErr } = await client
     .from('content_pipelines')
     .update({ status: 'ready', current_step: null, updated_at: now })
     .eq('id', a.pipelineId)
+    .in('status', [...RUNNING_PIPELINE_STATUSES, 'ready'])
   if (pipeErr) throw pipeErr
   await markJobReadyIfAllContentComplete(client, a.jobId)
 }

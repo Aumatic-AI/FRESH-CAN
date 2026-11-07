@@ -22,9 +22,27 @@ import {
 } from '../../db'
 import { SINGLE_SHOT_DURATION_SECONDS } from '../../prompts/singleShot'
 import { watermarkVideo } from '../../lib/videoWatermark'
+import {
+  CANCELLED_MESSAGE,
+  RUNNING_PIPELINE_STATUSES,
+  getPipelineStatus,
+  isPipelineStopped,
+  isTaskStuck,
+  nextTimeoutCount,
+  shouldReuseSubmittedTask,
+} from './runState'
 
 export const SUBMIT_STEP_NAME = 'single_shot_submit'
-export const TOPIC_PREFIX = '[Single-shot] '
+/** Written when KIE reports a task as failed, so a retry submits a fresh task instead of re-polling a dead one. */
+export const TASK_FAILED_STEP_NAME = 'single_shot_task_failed'
+
+/** Thrown by finalizers when the run was cancelled or failed underneath them; callers treat it as a clean stop. */
+export class SingleShotStoppedError extends Error {
+  constructor(message = 'single-shot run was stopped before it finished') {
+    super(message)
+    this.name = 'SingleShotStoppedError'
+  }
+}
 
 export interface SingleShotMeta {
   model: string
@@ -43,7 +61,10 @@ export interface SingleShotMeta {
   language: 'EN' | 'FR'
 }
 
-/** Submits to KIE once per pipeline generation; a retry reuses the saved task id and never pays twice. */
+/**
+ * Submits to KIE once per live task. A retry reuses the saved task id (never pays twice) unless KIE
+ * reported that task as failed, in which case a fresh task is submitted.
+ */
 export async function submitSingleShot(
   client: SupabaseClient,
   pipelineId: string,
@@ -56,7 +77,10 @@ export async function submitSingleShot(
     const saved = (await getLastSucceededStepOutput(client, scope, SUBMIT_STEP_NAME, generation)) as
       | { providerRef?: string }
       | null
-    if (saved?.providerRef) return saved.providerRef
+    const failed = (await getLastSucceededStepOutput(client, scope, TASK_FAILED_STEP_NAME, generation)) as
+      | { providerRef?: string }
+      | null
+    if (saved?.providerRef && shouldReuseSubmittedTask(saved.providerRef, failed?.providerRef)) return saved.providerRef
   }
 
   const ref = await generator.submit(input)
@@ -76,6 +100,58 @@ export async function submitSingleShot(
     outputSnapshot: { providerRef: ref.providerRef },
   })
   return ref.providerRef
+}
+
+/** Marks a KIE task as dead (KIE reported failure) so the next attempt submits a new one. */
+export async function recordSingleShotTaskFailed(
+  client: SupabaseClient,
+  pipelineId: string,
+  generation: number,
+  providerRef: string,
+  detail: string,
+): Promise<void> {
+  await recordStepAttempt(client, {
+    contentPipelineId: pipelineId,
+    stepName: TASK_FAILED_STEP_NAME,
+    generation,
+    attemptNumber: 1,
+    status: 'succeeded',
+    provider: 'kie',
+    outputSnapshot: { providerRef, detail },
+  })
+}
+
+/** Written each time a task's poll window runs out, so repeated timeouts of the same task can be counted. */
+export const TASK_TIMEOUT_STEP_NAME = 'single_shot_task_timeout'
+
+/**
+ * Records that a task did not finish within the poll window. The first timeout keeps the task alive (KIE may
+ * still finish it, and a Resume polls it again for free). Once the same task has timed out repeatedly it is
+ * marked dead like a KIE-reported failure, so the next retry submits a fresh task instead of polling it forever.
+ */
+export async function recordSingleShotTimeout(
+  client: SupabaseClient,
+  pipelineId: string,
+  generation: number,
+  providerRef: string,
+): Promise<{ count: number; stuck: boolean }> {
+  const scope = { contentPipelineId: pipelineId }
+  const last = (await getLastSucceededStepOutput(client, scope, TASK_TIMEOUT_STEP_NAME, generation)) as
+    | { providerRef?: string; count?: number }
+    | null
+  const count = nextTimeoutCount(providerRef, last)
+  await recordStepAttempt(client, {
+    ...scope,
+    stepName: TASK_TIMEOUT_STEP_NAME,
+    generation,
+    attemptNumber: count,
+    status: 'succeeded',
+    provider: 'kie',
+    outputSnapshot: { providerRef, count },
+  })
+  const stuck = isTaskStuck(count)
+  if (stuck) await recordSingleShotTaskFailed(client, pipelineId, generation, providerRef, `timed out ${count} times`)
+  return { count, stuck }
 }
 
 export async function pollSingleShot(generator: SingleShotGenerator, providerRef: string): Promise<VideoPollResult> {
@@ -100,6 +176,9 @@ export async function finalizeSingleShot(
   },
 ): Promise<string> {
   const { pipelineId, jobId, generation, kieFileUrl, meta } = args
+
+  // Stop BEFORE any download/upload/write if the run was cancelled or failed meanwhile.
+  if (isPipelineStopped(await getPipelineStatus(client, pipelineId))) throw new SingleShotStoppedError()
 
   // Same logo as the image pipeline (lib/watermark.ts), burned into the video. The untouched Seedance
   // file is kept next to it (`-raw`), so the logo can be redone without paying for another render.
@@ -130,6 +209,8 @@ export async function finalizeSingleShot(
         single_shot: true,
         model: meta.model,
         resolution: SINGLE_SHOT_RESOLUTION,
+        // duration_sec is the key the library, dashboard and notifications read; duration_seconds is kept for the draft/job page.
+        duration_sec: SINGLE_SHOT_DURATION_SECONDS,
         duration_seconds: SINGLE_SHOT_DURATION_SECONDS,
         aspect_ratio: meta.aspectRatio,
         original_idea: meta.originalIdea,
@@ -146,22 +227,32 @@ export async function finalizeSingleShot(
     .eq('content_language_track_id', trackId)
   if (markErr) throw markErr
 
+  // Final compare-and-swap: only a still-running pipeline may be finalized. If a cancel landed after
+  // the pre-check above, undo what this call wrote instead of resurrecting a cancelled video.
   const now = new Date().toISOString()
+  const completes = args.completesPipeline !== false
+  const { data: stillRunning, error: casErr } = await client
+    .from('content_pipelines')
+    .update(completes ? { status: 'ready', current_step: null, updated_at: now } : { updated_at: now })
+    .eq('id', pipelineId)
+    .in('status', [...RUNNING_PIPELINE_STATUSES, 'ready'])
+    .select('id')
+    .maybeSingle()
+  if (casErr) throw casErr
+  if (!stillRunning) {
+    await client.from('generated_content').delete().eq('content_language_track_id', trackId)
+    await client
+      .from('content_language_tracks')
+      .update({ status: 'failed', last_error: CANCELLED_MESSAGE, updated_at: now })
+      .eq('id', trackId)
+    throw new SingleShotStoppedError()
+  }
   const { error: trackErr } = await client
     .from('content_language_tracks')
     .update({ status: 'ready', current_step: null, updated_at: now })
     .eq('id', trackId)
   if (trackErr) throw trackErr
-  const completes = args.completesPipeline !== false
-  if (completes) {
-    const { error: pipeErr } = await client
-      .from('content_pipelines')
-      .update({ status: 'ready', current_step: null, updated_at: now })
-      .eq('id', pipelineId)
-    if (pipeErr) throw pipeErr
-  }
 
-  await prefixTopic(client, jobId)
   if (completes) await markJobReadyIfAllContentComplete(client, jobId)
   return fileUrl
 }
@@ -197,13 +288,4 @@ async function ensureTrack(
     .single()
   if (raceErr || !raced) throw error ?? raceErr
   return raced.id as string
-}
-
-async function prefixTopic(client: SupabaseClient, jobId: string): Promise<void> {
-  const { data, error } = await client.from('content_jobs').select('topic').eq('id', jobId).single()
-  if (error) throw error
-  const topic = (data?.topic as string | null) ?? ''
-  if (topic.startsWith(TOPIC_PREFIX)) return
-  const { error: updErr } = await client.from('content_jobs').update({ topic: `${TOPIC_PREFIX}${topic}` }).eq('id', jobId)
-  if (updErr) throw updErr
 }

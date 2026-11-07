@@ -15,6 +15,7 @@ import {
   SINGLE_SHOT_MAX_DIALOGUE_LINE_WORDS,
   SINGLE_SHOT_MAX_SPEAKERS,
   SINGLE_SHOT_MAX_SPOKEN_WORDS,
+  SINGLE_SHOT_NO_MUSIC_CLAUSE,
   SINGLE_SHOT_PROMPT_MAX_CHARS,
   SINGLE_SHOT_PROMPT_TARGET_CHARS,
   SINGLE_SHOT_PROMPT_MIN_CHARS,
@@ -79,6 +80,20 @@ export function describesContainerArrival(text: string): boolean {
   return false
 }
 
+const NEGATED_MUSIC = /\b(?:no|without|never|not any)\s+(?:any\s+)?(?:background\s+|musical\s+)?(?:music|score|soundtrack|singing|songs?)\b/gi
+const MUSIC_WORDS = /\b(?:music|musical|soundtrack|score|melody|melodic|songs?|singing|jingle|orchestra|orchestral)\b/i
+const SAYS_NO_MUSIC = /\b(?:no|without)\s+(?:any\s+)?(?:background\s+|musical\s+)?music\b/i
+
+/** True when the prompt asks for music or a musical mood (negated mentions like "no background music" are fine). */
+export function promptRequestsMusic(text: string): boolean {
+  return MUSIC_WORDS.test(text.replace(NEGATED_MUSIC, ' '))
+}
+
+/** Adds the no-music sentence when the prompt does not already say it. */
+export function withNoMusicClause(prompt: string): string {
+  return SAYS_NO_MUSIC.test(prompt) ? prompt : `${prompt} ${SINGLE_SHOT_NO_MUSIC_CLAUSE}`
+}
+
 function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
@@ -108,11 +123,15 @@ export function normalizeEnhancedPrompt(
   }
   const containerShown = shown as SingleShotContainerShown
 
-  const prompt = typeof obj.prompt === 'string' ? obj.prompt.trim() : ''
+  let prompt = typeof obj.prompt === 'string' ? obj.prompt.trim() : ''
   if (prompt.length < SINGLE_SHOT_PROMPT_MIN_CHARS) return `prompt too short (${prompt.length} chars)`
-  if (prompt.length > SINGLE_SHOT_PROMPT_MAX_CHARS) return `prompt too long (${prompt.length} chars, ${prompt.length - SINGLE_SHOT_PROMPT_TARGET_CHARS} over the ${SINGLE_SHOT_PROMPT_TARGET_CHARS} target; the hard limit is ${SINGLE_SHOT_PROMPT_MAX_CHARS}). Shorten it by cutting detail, keeping every story beat and every spoken line`
+  // Narration over natural ambient sound, never music. A music request is rejected (the model retries);
+  // a prompt that simply never says "no music" gets the clause appended, before the length cap is applied.
+  if (promptRequestsMusic(prompt)) return 'prompt asks for music or a musical mood; Fresh-CAN videos use natural ambient sound only, no music'
   const idea = originalIdea.trim().toLowerCase()
   if (idea.length > 0 && prompt.toLowerCase() === idea) return 'prompt just echoes the idea'
+  prompt = withNoMusicClause(prompt)
+  if (prompt.length > SINGLE_SHOT_PROMPT_MAX_CHARS) return `prompt too long (${prompt.length} chars, ${prompt.length - SINGLE_SHOT_PROMPT_TARGET_CHARS} over the ${SINGLE_SHOT_PROMPT_TARGET_CHARS} target; the hard limit is ${SINGLE_SHOT_PROMPT_MAX_CHARS}). Shorten it by cutting detail, keeping every story beat and every spoken line`
 
   const speakers: SingleShotSpeaker[] = Array.isArray(obj.speakers)
     ? obj.speakers.flatMap((sp): SingleShotSpeaker[] => {

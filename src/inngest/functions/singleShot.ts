@@ -1,7 +1,7 @@
-// Single-shot test path (branch test/seedance-single-shot): one 30s Seedance
-// 2.5 text-to-video clip with native audio. Started by the EXISTING
-// POST /api/jobs/[jobId]/video/generate route when ENABLE_SINGLE_SHOT_TEST is
-// on; with the flag off this function is never triggered.
+// Single-shot video, the DEFAULT video flow: one 30s Seedance 2.5 text-to-video
+// clip with native audio. Started by the EXISTING
+// POST /api/jobs/[jobId]/video/generate route; ENABLE_SINGLE_SHOT=false falls
+// back to the older scene-by-scene pipeline and this function is not triggered.
 //
 // Two stages, with the same approval gate as the scene pipeline:
 //  1. content/single-shot.generate: enhance the user's idea into an ad-reel prompt
@@ -15,7 +15,6 @@ import { inngest } from '../client'
 import {
   createServiceClient,
   claimPipeline,
-  markPipelineFailed,
   upsertVideoScriptDraft,
   markJobDraftReadyIfPending,
 } from '../../server/pipeline/db'
@@ -32,6 +31,9 @@ import {
   finalizeSingleShot,
   pollSingleShot,
   submitSingleShot,
+  SingleShotStoppedError,
+  recordSingleShotTaskFailed,
+  recordSingleShotTimeout,
 } from '../../server/pipeline/steps/singleShot/generateSingleShot'
 import {
   readSingleShotDraft,
@@ -50,6 +52,14 @@ import { BRAND_PROFILE } from '../../server/pipeline/prompts/index'
 import { env } from '../../server/pipeline/env'
 import { getApiKey } from '../../server/pipeline/credentials'
 import { failJobOnRunFailure } from '../runFailure'
+import {
+  RUNNING_PIPELINE_STATUSES,
+  failPipelineIfRunning,
+  getDraftKind,
+  getPipelineStatus,
+  getTrackStatus,
+  isPipelineStopped,
+} from '../../server/pipeline/steps/singleShot/runState'
 
 type AspectRatio = '9:16' | '1:1' | '16:9'
 
@@ -101,8 +111,16 @@ export const singleShotGenerate = inngest.createFunction(
       }
     })
 
+    // Never touch a pipeline that belongs to the legacy scene-by-scene flow.
+    const kind = await step.run('check-draft-kind', () => getDraftKind(client, pipelineId))
+    if (kind === 'legacy') return { status: 'skipped', reason: 'legacy pipeline' }
+
     // 'created' -> 'drafting'; a retry finds it already 'drafting' and carries on.
     await step.run('claim', () => claimPipeline(client, pipelineId, 'created', 'drafting', { current_step: 'single_shot_prompt' }))
+    // Only a pipeline that is actually drafting may spend OpenAI calls (a duplicate event for a
+    // failed, cancelled or finished pipeline must not).
+    const draftingStatus = await step.run('check-drafting', () => getPipelineStatus(client, pipelineId))
+    if (draftingStatus !== 'drafting') return { status: 'skipped', reason: `pipeline is ${draftingStatus}` }
 
     const enhanced = await step.run('enhance-prompt', async () =>
       enhanceSingleShotPrompt(
@@ -167,7 +185,7 @@ export const singleShotRender = inngest.createFunction(
     const ctx = await step.run('load-approved-draft', async () => {
       const { data: pipeline, error } = await client
         .from('content_pipelines')
-        .select('current_generation')
+        .select('current_generation, status')
         .eq('id', pipelineId)
         .single()
       if (error || !pipeline) throw new Error(`Failed to load content_pipelines row ${pipelineId}`)
@@ -178,9 +196,29 @@ export const singleShotRender = inngest.createFunction(
         .maybeSingle()
       if (dErr) throw dErr
       const enhanced = readSingleShotDraft(draft?.draft_data)
-      if (!enhanced) throw new Error(`No single-shot draft found for pipeline ${pipelineId}`)
-      return { generation: pipeline.current_generation as number, enhanced }
+      // Not a single-shot pipeline (legacy draft or none): leave it alone, never fail it.
+      if (!enhanced) return null
+      const clipLang = (enhanced.languages ?? 'EN') === 'FR' ? 'FR' : 'EN'
+      const { data: clipTrack, error: cErr } = await client
+        .from('content_language_tracks')
+        .select('status')
+        .eq('content_pipeline_id', pipelineId)
+        .eq('language', clipLang)
+        .maybeSingle()
+      if (cErr) throw cErr
+      return {
+        generation: pipeline.current_generation as number,
+        pipelineStatus: pipeline.status as string,
+        clipReady: clipTrack?.status === 'ready',
+        enhanced,
+      }
     })
+    if (!ctx) return { status: 'skipped', reason: 'not a single-shot draft' }
+    // A duplicate or late event: only an approved/generating pipeline whose clip is not already
+    // finished may render (a re-approval after finish, failure or cancel must not pay again).
+    if (!(RUNNING_PIPELINE_STATUSES as readonly string[]).includes(ctx.pipelineStatus) || ctx.clipReady) {
+      return { status: 'skipped', reason: ctx.clipReady ? 'clip already rendered' : `pipeline is ${ctx.pipelineStatus}` }
+    }
     const { generation } = ctx
     const approved = ctx.enhanced
     const enhanced = {
@@ -201,6 +239,9 @@ export const singleShotRender = inngest.createFunction(
 
     // 'approved' -> 'generating'; a retry finds it already 'generating' and carries on.
     await step.run('claim', () => claimPipeline(client, pipelineId, 'approved', 'generating', { current_step: 'single_shot' }))
+    // Cancelled between approval and now: stop before the paid submit.
+    const preSubmit = await step.run('check-before-submit', () => getPipelineStatus(client, pipelineId))
+    if (preSubmit !== 'generating') return { status: 'stopped', reason: `pipeline is ${preSubmit}` }
 
     const providerRef = await step.run('submit', async () =>
       submitSingleShot(client, pipelineId, job.generation, await singleShotGenerator(jobId), {
@@ -212,15 +253,27 @@ export const singleShotRender = inngest.createFunction(
     )
 
     for (let i = 0; i < MAX_POLL_ITERATIONS; i++) {
-      const result = await step.run(`poll-${i}`, async () => pollSingleShot(await singleShotGenerator(jobId), providerRef))
+      // Checks for a cancel BEFORE every KIE request, so a cancelled job stops polling at once.
+      const result = await step.run(`poll-${i}`, async () => {
+        if (isPipelineStopped(await getPipelineStatus(client, pipelineId))) return { status: 'stopped' as const }
+        return pollSingleShot(await singleShotGenerator(jobId), providerRef)
+      })
 
+      if (result.status === 'stopped') return { status: 'stopped', reason: 'cancelled or failed while rendering' }
       if (result.status === 'failed') {
-        await step.run('mark-failed', () => markPipelineFailed(client, pipelineId, `Seedance failed: ${result.detail}`))
+        await step.run('mark-failed', async () => {
+          // The task is dead: record it so a retry submits a fresh one instead of re-polling it.
+          await recordSingleShotTaskFailed(client, pipelineId, job.generation, providerRef, result.detail)
+          await failPipelineIfRunning(client, pipelineId, `Seedance failed: ${result.detail}`)
+        })
         return { status: 'failed', detail: result.detail }
       }
       if (result.status === 'ready') {
-        const fileUrl = await step.run('finalize', async () =>
-          finalizeSingleShot(client, new SupabaseVideoStorageUploader(client), {
+        const finalized = await step.run('finalize', async () => {
+          try {
+            return {
+              stopped: false as const,
+              fileUrl: await finalizeSingleShot(client, new SupabaseVideoStorageUploader(client), {
             pipelineId,
             jobId,
             generation: job.generation,
@@ -242,7 +295,14 @@ export const singleShotRender = inngest.createFunction(
             // BOTH: the pipeline and job stay open until the French track is done.
             completesPipeline: languages !== 'BOTH',
           }),
-        )
+            }
+          } catch (err) {
+            if (err instanceof SingleShotStoppedError) return { stopped: true as const, fileUrl: '' }
+            throw err
+          }
+        })
+        if (finalized.stopped) return { status: 'stopped', reason: 'cancelled while finalizing' }
+        const fileUrl = finalized.fileUrl
         if (languages === 'BOTH') {
           const frTrackId = await step.run('find-french-track', async () => {
             const { data, error } = await client
@@ -265,9 +325,18 @@ export const singleShotRender = inngest.createFunction(
       await step.sleep(`poll-wait-${i}`, POLL_INTERVAL)
     }
 
-    await step.run('mark-timeout', () =>
-      markPipelineFailed(client, pipelineId, 'Seedance render did not finish within 30 minutes'),
-    )
+    // The first timeout keeps the task: KIE may still finish it, so Resume polls the same task again for free.
+    // A task that keeps timing out is marked dead, so the next retry submits a fresh one.
+    await step.run('mark-timeout', async () => {
+      const { stuck } = await recordSingleShotTimeout(client, pipelineId, job.generation, providerRef)
+      await failPipelineIfRunning(
+        client,
+        pipelineId,
+        stuck
+          ? 'Seedance render timed out repeatedly; Retry will start a new render'
+          : 'Seedance render did not finish within 30 minutes; Resume checks it again',
+      )
+    })
     return { status: 'failed', detail: 'timeout' }
   },
 )
@@ -332,6 +401,11 @@ export const singleShotFrenchTrack = inngest.createFunction(
       if (error) throw error
     })
 
+    // A cancelled/failed pipeline or track stops here, before any AssemblyAI or ElevenLabs request.
+    const runnable = async () =>
+      !isPipelineStopped(await getPipelineStatus(client, pipelineId)) && (await getTrackStatus(client, trackId)) !== 'failed'
+    if (!(await step.run('check-french-runnable', runnable))) return { status: 'stopped', reason: 'cancelled or failed' }
+
     const englishLines = ctx.draft.spoken_lines.map((l) => l.text)
     const frenchLines = ctx.draft.french_lines as string[]
 
@@ -351,12 +425,14 @@ export const singleShotFrenchTrack = inngest.createFunction(
       let words = null as ReturnType<typeof parseTimedWords> | null
       for (let i = 0; i < FRENCH_MAX_POLLS && words === null; i++) {
         const polled = await step.run(`poll-transcript-${i}`, async () => {
+          if (!(await runnable())) return { done: true as const, words: [], stopped: true as const }
           const transcription = new AssemblyAITranscriptionService(await getApiKey('assemblyai', { jobId }))
           const r = await transcription.poll({ providerRef: timing.ref })
           if (r.status === 'ready') return { done: true as const, words: parseTimedWords(r.timingData) }
           if (r.status === 'failed') return { done: true as const, words: [] }
           return { done: false as const }
         })
+        if ('stopped' in polled) return { status: 'stopped', reason: 'cancelled or failed while timing' }
         if (polled.done) words = polled.words
         else await step.sleep(`poll-transcript-wait-${i}`, FRENCH_POLL_INTERVAL)
       }
@@ -368,8 +444,12 @@ export const singleShotFrenchTrack = inngest.createFunction(
       timingSource = timing.source
     }
 
-    const result = await step.run('render-french', async () =>
-      renderFrenchTrack(
+    // Last check before the paid ElevenLabs calls and the final mix.
+    if (!(await step.run('check-before-render-french', runnable))) return { status: 'stopped', reason: 'cancelled or failed' }
+
+    const result = await step.run('render-french', async () => {
+      try {
+        return await renderFrenchTrack(
         {
           client,
           voice: env.KIE_FAKE_MODE ? new FakeVoiceSynthesizer() : new ElevenLabsVoiceSynthesizer(await getApiKey('elevenlabs', { jobId })),
@@ -394,8 +474,13 @@ export const singleShotFrenchTrack = inngest.createFunction(
           containerShown: ctx.draft.container_shown,
           referenceImageUrls: ctx.draft.reference_image_urls,
         },
-      ),
-    )
+        )
+      } catch (err) {
+        if (err instanceof SingleShotStoppedError) return { stopped: true as const }
+        throw err
+      }
+    })
+    if ('stopped' in result) return { status: 'stopped', reason: 'cancelled while finalizing' }
     return { status: 'ready', ...result }
   },
 )

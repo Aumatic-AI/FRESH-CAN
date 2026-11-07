@@ -198,3 +198,28 @@ describe('prompt length cap', () => {
     expect(bad).toMatch(/over the 3000 target/)
   })
 })
+
+import { promptRequestsMusic, withNoMusicClause } from './enhancePrompt'
+import { SINGLE_SHOT_NO_MUSIC_CLAUSE } from '../../prompts/singleShot'
+
+describe('no background music', () => {
+  it('flags a request for music but allows negated mentions', () => {
+    expect(promptRequestsMusic('A gentle musical mood with soft piano music.')).toBe(true)
+    expect(promptRequestsMusic('Cinematic score swells at the end.')).toBe(true)
+    expect(promptRequestsMusic('Ambient room tone. No background music, no musical score, no singing.')).toBe(false)
+    expect(promptRequestsMusic('Footsteps and the door closing, without music.')).toBe(false)
+  })
+  it('rejects a prompt that asks for music', () => {
+    const r = normalizeEnhancedPrompt({ ...narration, prompt: narration.prompt + ' A gentle musical mood underneath.' }, 'x')
+    expect(r).toMatch(/music/)
+  })
+  it('appends the no-music clause when the model never said it, and keeps it once when it did', () => {
+    const r = normalizeEnhancedPrompt({ ...narration }, 'x')
+    expect(typeof r === 'object' && r.prompt).toContain(SINGLE_SHOT_NO_MUSIC_CLAUSE)
+    expect(withNoMusicClause('Ambient sound only. No background music.')).toBe('Ambient sound only. No background music.')
+  })
+  it('applies the length cap after the clause is added', () => {
+    const almost = 'a'.repeat(5000 - 10)
+    expect(normalizeEnhancedPrompt({ ...narration, prompt: almost }, 'x')).toMatch(/too long/)
+  })
+})

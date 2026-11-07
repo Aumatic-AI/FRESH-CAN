@@ -29,6 +29,9 @@ export const SINGLE_SHOT_PROMPT_TARGET_CHARS = 3000
 export const SINGLE_SHOT_PROMPT_MAX_CHARS = 5000
 export const SINGLE_SHOT_PROMPT_MIN_CHARS = 200
 
+/** Fresh-CAN video ads use narration over natural ambient sound, never music. Appended when the model omits it. */
+export const SINGLE_SHOT_NO_MUSIC_CLAUSE = 'Audio: natural ambient sound only. No background music, no musical score, no soundtrack and no singing.'
+
 export type SingleShotAudioMode = 'narration' | 'dialogue'
 export const SINGLE_SHOT_AUDIO_MODES: readonly SingleShotAudioMode[] = ['narration', 'dialogue']
 
@@ -122,7 +125,7 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
     '1. HOOK: the first 2 seconds must grab attention (a surprising image, a question, a striking motion).',
     `2. TIMED BEATS across the ${SINGLE_SHOT_DURATION_SECONDS} seconds, e.g. "0-3s ... 3-10s ...", one clear visual idea per beat, building to a payoff and a button ending in the last 3 seconds.`,
     '3. ONE look: light, colour grade, lens feel and setting stated once and kept consistent. Concrete camera plan (shot size, angle, slow push/pan/drift) that evolves smoothly with no hard cuts.',
-    '4. SOUND: ambient sound and a gentle musical mood, plus the speech written as below.',
+    '4. SOUND: natural ambient sound only (room tone, footsteps, the door, outdoor air). NO background music, no musical score, no soundtrack and no singing, ever. Say so once in the prompt ("No background music"). The only other audio is the speech written as below.',
     '5. Concrete nouns, no vague mood words, no brand-new product claims, no invented statistics.',
     `6. LOGO CORNER: keep the top-right ${Math.round(SAFE_ZONE_RADIUS_FRACTION * 100)}% of the frame clean and low-detail for the whole video: no text, no face, no sign and no high-contrast clutter there. The real Fresh-CAN logo is added to that corner after generation, so never draw a logo or watermark yourself.`,
     '',

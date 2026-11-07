@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { inngest } from '@/inngest/client'
+import { readSingleShotDraft } from '@/server/pipeline/steps/singleShot/updateSingleShot'
+import { planSingleShotRecovery, restartFrenchTrack, restartSingleShotRender } from '@/server/pipeline/steps/singleShot/runState'
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -60,6 +62,44 @@ export async function POST(
     .maybeSingle()
   if (pErr) return NextResponse.json({ error: pErr.message }, { status: 500 })
   if (!pipeline) return NextResponse.json({ error: 'No video pipeline for this job' }, { status: 404 })
+
+  // Single-shot videos have their own recovery semantics (resume a live KIE task, fresh task only
+  // after KIE reported failure, French track retried on its own). Never send them the legacy
+  // scene-by-scene events below.
+  const { data: ssDraftRow } = await supabase
+    .from('content_drafts')
+    .select('draft_data')
+    .eq('content_pipeline_id', pipeline.id)
+    .maybeSingle()
+  const ssDraft = readSingleShotDraft(ssDraftRow?.draft_data)
+  if (ssDraft) {
+    const languages = ssDraft.languages ?? 'EN'
+    const clipLanguage = languages === 'FR' ? 'FR' : 'EN'
+    const { data: ssTracks, error: ssErr } = await supabase
+      .from('content_language_tracks')
+      .select('id, language, status')
+      .eq('content_pipeline_id', pipeline.id)
+    if (ssErr) return NextResponse.json({ error: ssErr.message }, { status: 500 })
+    const frenchTrack = (ssTracks ?? []).find((t) => t.language === 'FR')
+    const plan = planSingleShotRecovery({
+      pipelineStatus: pipeline.status as string,
+      lastError: (pipeline.last_error as string | null) ?? null,
+      languages,
+      clipReady: (ssTracks ?? []).some((t) => t.language === clipLanguage && t.status === 'ready'),
+      frenchTrackStatus: (frenchTrack?.status as string | undefined) ?? null,
+    })
+    if (plan.action === 'none') return NextResponse.json({ error: plan.reason }, { status: 409 })
+    if (plan.action === 'retry_french_track' && frenchTrack) {
+      const restarted = await restartFrenchTrack(supabase, pipeline.id as string, jobId, frenchTrack.id as string)
+      if (!restarted) return NextResponse.json({ error: 'Track status changed concurrently, resume not applied' }, { status: 409 })
+      await inngest.send(restarted.event)
+      return NextResponse.json({ pipeline, tracksResumed: 1 })
+    }
+    const restarted = await restartSingleShotRender(supabase, pipeline.id as string, jobId)
+    if (!restarted) return NextResponse.json({ error: 'Pipeline status changed concurrently, resume not applied' }, { status: 409 })
+    await inngest.send(restarted.event)
+    return NextResponse.json({ pipeline: restarted.pipeline, tracksResumed: (ssTracks ?? []).length })
+  }
 
   if (pipeline.status !== 'failed') {
     return NextResponse.json(

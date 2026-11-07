@@ -183,6 +183,9 @@ export interface VideoLibraryItem {
   video_url: string
   output_data: {
     duration_sec?: number
+    /** Older single-shot rows only; new rows write duration_sec too. */
+    duration_seconds?: number
+    single_shot?: boolean
     total_scenes?: number
     language?: string
     script_type?: string
