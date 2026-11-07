@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-11-07 — Single-shot narration: connected, detailed, no longer sparse (uncommitted)
+- Why: job 6daa6b34 had 56 words of caption-like lines; a loudness check showed the voice used <=19s of 30s, so the old 70-word cap was not the limit. The French voice (BOTH) is the real limit: its last line already overflowed by 468 ms.
+- New step `write-narration` (before `enhance-prompt`): one connected passage, every beat of the idea covered, 5-7 lines of 6-14 words. Limits: EN/FR 70-80 words, BOTH 64-70 (floor enforced, retried up to 3x). Checks: bare labels, filler, music/banned words, beat coverage, adjacent same opener, and >= half the lines linking to the previous one. Dialogue and creator-written copy skip it.
+- `enhance-prompt` receives the lines as final copy (must be spoken verbatim, in order, narration mode); max words now 80 (EN/FR) / 70 (BOTH). French adaptation factor 1.25 -> 1.15 and told to keep connectors.
+- Not done: no real paid run (needs approval); no Inngest-function test; Seedance may still pause slightly between quoted lines.
+
 ## 2026-11-07 — Single-shot audit pass
 - Verified: default routing (env.test), resume/retry/approve single-shot-aware, cancel checks in poll/finalize/French, fresh KIE task after a failed one, duration_sec contract, no-music prompt rule. Added guard so a stray legacy `content/video.generate` skips pipelines holding a single-shot draft.
 - Checks: tsc clean, 6 single-shot/env unit files (57 tests) pass, `npm run build` passes; eslint has 22 pre-existing-style React-compiler errors in 3 UI files (job page, library, dashboard).

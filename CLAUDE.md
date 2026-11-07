@@ -172,6 +172,13 @@ pipeline (`video.ts`, still in the codebase; its form controls for duration and
 voice were removed from `/dashboard/new`). Failed draft stage: `/video/generate`
 restarts it (job page shows Retry); failed after approval: `/video/resume`.
 
+Narration is written first, in its own step (`steps/singleShot/writeNarration.ts`,
+prompts in `prompts/singleShotNarration.ts`): one connected passage covering every
+beat of the idea, 70-80 words (BOTH 64-70, because French runs longer), split into
+5-7 lines of 6-14 words. It is validated (length, beat coverage, flow) and handed to
+the video-prompt step as final copy. Dialogue ideas and creator-written copy skip it.
+French adaptation allows lines about 1.15x the English word count.
+
 ## 🎨 CREATIVE TWIST (image_post + blog images)
 
 `src/server/pipeline/steps/shared/creativeTwist.ts` (step `creative_twist`, fails
