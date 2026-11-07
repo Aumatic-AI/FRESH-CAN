@@ -94,7 +94,7 @@ describe('normalizeEnhancedPrompt: general checks', () => {
     expect(normalizeEnhancedPrompt({ ...narration, audio_mode: 'both' }, 'x')).toMatch(/audio_mode/)
     expect(normalizeEnhancedPrompt({ ...narration, spoken_lines: [] }, 'x')).toMatch(/spoken_lines is empty/)
     expect(normalizeEnhancedPrompt({ ...narration, spoken_lines: [{ speaker: 'narrator', text: 'Not in the prompt at all.' }] }, 'x')).toMatch(/word for word/)
-    const many = Array.from({ length: 80 }, (_, i) => `w${i}`).join(' ')
+    const many = Array.from({ length: 81 }, (_, i) => `w${i}`).join(' ')
     expect(
       normalizeEnhancedPrompt({ ...narration, prompt: narrationPrompt + ` "${many}"`, spoken_lines: [{ speaker: 'narrator', text: many }] }, 'x'),
     ).toMatch(/too many spoken words/)
@@ -221,5 +221,25 @@ describe('no background music', () => {
   it('applies the length cap after the clause is added', () => {
     const almost = 'a'.repeat(5000 - 10)
     expect(normalizeEnhancedPrompt({ ...narration, prompt: almost }, 'x')).toMatch(/too long/)
+  })
+})
+
+describe('normalizeEnhancedPrompt: word limits and final narration', () => {
+  const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(' ')
+  const withLine = (text: string) => ({ ...narration, prompt: narrationPrompt + ` "${text}"`, spoken_lines: [{ speaker: 'narrator', text }] })
+
+  it('allows 80 words for EN but only 70 for BOTH (French runs longer in the same slots)', () => {
+    expect(typeof normalizeWithBrand(withLine(words(80)), 'x', BRAND_PROFILE, { language: 'EN' })).toBe('object')
+    expect(normalizeWithBrand(withLine(words(75)), 'x', BRAND_PROFILE, { language: 'BOTH', requireNarration: true })).toMatch(/too many spoken words \(75, max 70\)/)
+  })
+
+  it('requires the spoken lines to be exactly the final narration, in order', () => {
+    const locked = ['Imagine a world without colour.']
+    expect(typeof normalizeWithBrand(narration, 'x', BRAND_PROFILE, { lockedLines: locked })).toBe('object')
+    expect(normalizeWithBrand(narration, 'x', BRAND_PROFILE, { lockedLines: ['Something else entirely here.'] })).toMatch(/exactly the final narration/)
+  })
+
+  it('does not apply the word cap to final narration (it was already checked) but still demands narration mode', () => {
+    expect(typeof normalizeWithBrand(withLine(words(90)), 'x', BRAND_PROFILE, { lockedLines: [words(90)] })).toBe('object')
   })
 })

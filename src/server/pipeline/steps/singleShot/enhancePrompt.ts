@@ -14,13 +14,14 @@ import {
   SINGLE_SHOT_CONTAINER_VALUES,
   SINGLE_SHOT_MAX_DIALOGUE_LINE_WORDS,
   SINGLE_SHOT_MAX_SPEAKERS,
-  SINGLE_SHOT_MAX_SPOKEN_WORDS,
+  singleShotMaxSpokenWords,
   SINGLE_SHOT_NO_MUSIC_CLAUSE,
   SINGLE_SHOT_PROMPT_MAX_CHARS,
   SINGLE_SHOT_PROMPT_TARGET_CHARS,
   SINGLE_SHOT_PROMPT_MIN_CHARS,
   type SingleShotAudioMode,
   type SingleShotContainerShown,
+  type SingleShotJobLanguage,
   type SingleShotPromptInput,
 } from '../../prompts/singleShot'
 import type { BrandProfile } from '../../prompts/types'
@@ -103,7 +104,7 @@ export function normalizeEnhancedPrompt(
   parsed: unknown,
   originalIdea: string,
   brand: BrandProfile,
-  opts: { requireNarration?: boolean } = {},
+  opts: { requireNarration?: boolean; language?: SingleShotJobLanguage; lockedLines?: string[] } = {},
 ): EnhancedSingleShotPrompt | string {
   if (!parsed || typeof parsed !== 'object') return 'reply was not a JSON object'
   const obj = parsed as Record<string, unknown>
@@ -156,8 +157,17 @@ export function normalizeEnhancedPrompt(
   if (spokenLines.length === 0) return 'spoken_lines is empty: both modes need at least one spoken line'
 
   const totalWords = spokenLines.reduce((n, l) => n + wordCount(l.text), 0)
-  if (totalWords > SINGLE_SHOT_MAX_SPOKEN_WORDS) {
-    return `too many spoken words (${totalWords}, max ${SINGLE_SHOT_MAX_SPOKEN_WORDS})`
+  const maxWords = singleShotMaxSpokenWords(opts.language)
+  if (!opts.lockedLines && totalWords > maxWords) {
+    return `too many spoken words (${totalWords}, max ${maxWords})`
+  }
+  if (opts.lockedLines) {
+    if (audioMode !== 'narration') return 'the narration is final and must be spoken as a voiceover: audio_mode must be "narration"'
+    const want = opts.lockedLines.map(flat)
+    const got = spokenLines.map((l) => flat(l.text))
+    if (want.length !== got.length || want.some((w, i) => w !== got[i])) {
+      return 'spoken_lines must be exactly the final narration lines, in order, unchanged'
+    }
   }
 
   // The container photos are attached only when the container is shown, and the prompt must agree.
@@ -217,7 +227,7 @@ export async function enhanceSingleShotPrompt(
   input: SingleShotPromptInput,
 ): Promise<EnhancedSingleShotPrompt> {
   const scope = { contentPipelineId: pipelineId }
-  const narrationOnly = { requireNarration: input.language === 'BOTH' }
+  const narrationOnly = { requireNarration: input.language === 'BOTH', language: input.language ?? 'EN', lockedLines: input.lockedNarration }
 
   if (await hasSucceededStep(client, scope, ENHANCE_STEP_NAME, generation)) {
     const cached = await getLastSucceededStepOutput(client, scope, ENHANCE_STEP_NAME, generation)
@@ -253,7 +263,7 @@ export async function enhanceSingleShotPrompt(
       attemptNumber: attempt,
       status: 'succeeded',
       provider: 'openai',
-      inputSnapshot: { idea: input.idea, aspectRatio: input.aspectRatio },
+      inputSnapshot: { idea: input.idea, aspectRatio: input.aspectRatio, lockedNarration: input.lockedNarration ?? null },
       outputSnapshot: {
         container_shown: checked.containerShown,
         reference_image_urls: checked.referenceImageUrls,

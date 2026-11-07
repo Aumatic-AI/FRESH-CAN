@@ -27,6 +27,7 @@ import {
 } from '../../server/pipeline/adapters/kieSingleShot'
 import { SupabaseVideoStorageUploader } from '../../server/pipeline/adapters/storage'
 import { enhanceSingleShotPrompt } from '../../server/pipeline/steps/singleShot/enhancePrompt'
+import { writeSingleShotNarration } from '../../server/pipeline/steps/singleShot/writeNarration'
 import {
   finalizeSingleShot,
   pollSingleShot,
@@ -122,6 +123,19 @@ export const singleShotGenerate = inngest.createFunction(
     const draftingStatus = await step.run('check-drafting', () => getPipelineStatus(client, pipelineId))
     if (draftingStatus !== 'drafting') return { status: 'skipped', reason: `pipeline is ${draftingStatus}` }
 
+    // The voiceover is written first, as one connected passage that covers every beat of the idea, and handed to
+    // the video prompt as final copy. A dialogue idea or creator-written copy skips this and runs as before.
+    const narration = await step.run('write-narration', async () =>
+      writeSingleShotNarration(
+        client,
+        pipelineId,
+        job.generation,
+        new OpenAIScriptGenerator(await getApiKey('openai', { jobId })),
+        BRAND_PROFILE,
+        { idea: job.idea, topic: job.topic, language: job.language },
+      ),
+    )
+
     const enhanced = await step.run('enhance-prompt', async () =>
       enhanceSingleShotPrompt(
         client,
@@ -136,6 +150,7 @@ export const singleShotGenerate = inngest.createFunction(
           targetAudience: job.targetAudience,
           aspectRatio: job.aspectRatio,
           language: job.language,
+          lockedNarration: narration.kind === 'lines' ? narration.lines : undefined,
         },
       ),
     )

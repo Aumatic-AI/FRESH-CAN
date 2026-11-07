@@ -54,8 +54,8 @@ describe('single-shot prompt instructions', () => {
     expect(system).toMatch(/including a journey that starts outside/)
   })
 
-  it('asks for 60-70 spoken words and adds no narration style rules', () => {
-    expect(system).toMatch(/LENGTH: .*write 60-70 spoken words in total/)
+  it('asks for 70-80 connected spoken words (EN) and adds no narration style rules', () => {
+    expect(system).toMatch(/LENGTH: .*write 70-80 spoken words in total/)
     expect(system).not.toMatch(/CINEMATIC NARRATION|CONCRETE ENDING|FULLER NARRATION/)
     expect(system).not.toMatch(/imagery-led|callback|evocative/i)
   })
@@ -101,5 +101,23 @@ describe('single-shot language directive', () => {
     expect(singleShotLanguageDirective('FR')).toMatch(/Canadian French/)
     expect(composeSingleShotSystemPrompt(BRAND_PROFILE, 'BOTH')).toContain('LANGUAGE:')
     expect(composeSingleShotSystemPrompt(BRAND_PROFILE)).not.toContain('LANGUAGE:')
+  })
+})
+
+describe('final narration handed to the video prompt', () => {
+  const lines = ['Fresh-CAN starts with a free app.', 'Then the door opens for you.']
+  it('lists every line verbatim, in order, and forces narration mode', () => {
+    const user = composeSingleShotUserPrompt({ idea: 'i', topic: 't', category: 'c', targetAudience: 'a', aspectRatio: '9:16', lockedNarration: lines })
+    expect(user).toMatch(/narration is FINAL/)
+    expect(user).toContain('1. "Fresh-CAN starts with a free app."')
+    expect(user.indexOf('2. "Then the door')).toBeGreaterThan(user.indexOf('1. "Fresh-CAN'))
+    expect(user).toMatch(/audio_mode must be "narration"/)
+  })
+  it('adds nothing when there is no final narration', () => {
+    expect(composeSingleShotUserPrompt({ idea: 'i', topic: 't', category: 'c', targetAudience: 'a', aspectRatio: '9:16' })).not.toMatch(/FINAL/)
+  })
+  it('says BOTH max is 70 and EN is 80', () => {
+    expect(composeSingleShotSystemPrompt(BRAND_PROFILE, 'BOTH')).toMatch(/no more than 70/)
+    expect(composeSingleShotSystemPrompt(BRAND_PROFILE, 'EN')).toMatch(/no more than 80/)
   })
 })

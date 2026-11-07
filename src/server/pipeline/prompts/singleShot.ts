@@ -35,8 +35,13 @@ export const SINGLE_SHOT_NO_MUSIC_CLAUSE = 'Audio: natural ambient sound only. N
 export type SingleShotAudioMode = 'narration' | 'dialogue'
 export const SINGLE_SHOT_AUDIO_MODES: readonly SingleShotAudioMode[] = ['narration', 'dialogue']
 
-/** Total spoken words across the whole 30s (calm pace, room for pauses and beats). */
-export const SINGLE_SHOT_MAX_SPOKEN_WORDS = 70
+/**
+ * Most spoken words across the whole 30s. The clip has room for ~80 at a natural pace (a measured 56-word clip
+ * spoke for under 19s); BOTH stays at 70 because the French voice runs 15-25% longer inside the same timing slots.
+ */
+export function singleShotMaxSpokenWords(language: SingleShotJobLanguage = 'EN'): number {
+  return language === 'BOTH' ? 70 : 80
+}
 /** Longest single dialogue line; long speeches break lip sync. */
 export const SINGLE_SHOT_MAX_DIALOGUE_LINE_WORDS = 18
 export const SINGLE_SHOT_MAX_SPEAKERS = 2
@@ -88,6 +93,18 @@ export interface SingleShotPromptInput {
   previousProblem?: string
   /** The form's language (default EN). */
   language?: SingleShotJobLanguage
+  /** Final narration written by the narration step: spoken verbatim, in order, as narration. */
+  lockedNarration?: string[]
+}
+
+/** Tells the video-prompt step that the narration is final. Appended to its user message. */
+export function lockedNarrationDirective(lines: string[]): string {
+  return [
+    'The narration is FINAL and already written. Do not change, add, drop or reorder a word:',
+    ...lines.map((l, i) => `${i + 1}. "${l}"`),
+    'audio_mode must be "narration". Put each line, in this exact order and in double quotes, at the beat in the timed plan where it is heard. The voice is one continuous piece: plan the beats so the lines follow each other without long silent gaps.',
+    'spoken_lines must be exactly these lines. The length rule below does not apply to them.',
+  ].join('\n')
 }
 
 export function composeSingleShotSystemPrompt(brand: BrandProfile, language: SingleShotJobLanguage = 'EN'): string {
@@ -123,7 +140,7 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
     '',
     'STEP 2: WRITE THE PROMPT as flowing direction a film crew could follow:',
     '1. HOOK: the first 2 seconds must grab attention (a surprising image, a question, a striking motion).',
-    `2. TIMED BEATS across the ${SINGLE_SHOT_DURATION_SECONDS} seconds, e.g. "0-3s ... 3-10s ...", one clear visual idea per beat, building to a payoff and a button ending in the last 3 seconds.`,
+    `2. TIMED BEATS across the ${SINGLE_SHOT_DURATION_SECONDS} seconds, e.g. "0-3s ... 3-10s ...", one clear visual idea per beat (while the voice tells one continuous story across the beats), building to a payoff and a button ending in the last 3 seconds.`,
     '3. ONE look: light, colour grade, lens feel and setting stated once and kept consistent. Concrete camera plan (shot size, angle, slow push/pan/drift) that evolves smoothly with no hard cuts.',
     '4. SOUND: natural ambient sound only (room tone, footsteps, the door, outdoor air). NO background music, no musical score, no soundtrack and no singing, ever. Say so once in the prompt ("No background music"). The only other audio is the speech written as below.',
     '5. Concrete nouns, no vague mood words, no brand-new product claims, no invented statistics.',
@@ -133,7 +150,7 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
     '- Write a sentence such as: Voiceover only: nobody on screen speaks and no mouth moves. A calm, warm [gender/age/tone] voice says: "exact line".',
     '- Put every spoken line in double quotes, in the order spoken, placed at the beat where it is heard. Plain, short sentences that are easy to say aloud.',
     '- Do NOT write the words "lip-sync" or have any visible person talk.',
-    `- LENGTH: unless the creator wrote finished copy (then speak exactly that), write 60-${SINGLE_SHOT_MAX_SPOKEN_WORDS} spoken words in total across the video.`,
+    `- LENGTH: unless the creator wrote finished copy (then speak exactly that), write ${singleShotMaxSpokenWords(language) - 10}-${singleShotMaxSpokenWords(language)} spoken words in total across the video, as connected sentences that flow into each other, not separate captions.`,
     '',
     'Speech rules for "dialogue":',
     `- At most ${SINGLE_SHOT_MAX_SPEAKERS} speakers. Describe each speaker once in the prompt (age, look, clothes) and call them by the same short label every time (e.g. "the woman in the green coat").`,
@@ -141,7 +158,7 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
     `- Each line at most ${SINGLE_SHOT_MAX_DIALOGUE_LINE_WORDS} words, natural speech, with a short pause between turns. Keep speakers' faces and mouths in frame while they talk.`,
     '- No separate voiceover on top of the dialogue.',
     '',
-    `Both modes: the spoken words total no more than ${SINGLE_SHOT_MAX_SPOKEN_WORDS}. Every spoken line must appear word for word, in double quotes, inside the prompt and also in spoken_lines.`,
+    `Both modes: the spoken words total no more than ${singleShotMaxSpokenWords(language)} (unless the narration is given as final). Every spoken line must appear word for word, in double quotes, inside the prompt and also in spoken_lines.`,
     `The aspect ratio is given in the user message. Aim for about ${SINGLE_SHOT_PROMPT_TARGET_CHARS} characters and never exceed ${SINGLE_SHOT_PROMPT_MAX_CHARS}; trim detail before breaking that limit.`,
     '',
     'Reply with strictly valid JSON only, in this shape:',
@@ -167,6 +184,7 @@ export function composeSingleShotUserPrompt(input: SingleShotPromptInput): strin
     `Aspect ratio: ${input.aspectRatio}; compose for exactly this frame.`,
     `Length: ${SINGLE_SHOT_DURATION_SECONDS} seconds, one continuous shot.`,
   ]
+  if (input.lockedNarration?.length) lines.push(lockedNarrationDirective(input.lockedNarration))
   if (input.previousProblem) {
     lines.push(`Your previous reply was rejected: ${input.previousProblem}. Fix exactly that and reply again.`)
   }

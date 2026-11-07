@@ -57,3 +57,13 @@ describe('French adaptation checks', () => {
     await expect(adaptSingleShotFrench(bad, BRAND_PROFILE, en)).rejects.toThrow(/failed after 3 attempts/)
   })
 })
+
+describe('French length factor and flow', () => {
+  it('allows French about 15% longer than the English line (plus one word)', async () => {
+    const { frenchLineMaxWords } = await import('./adaptFrench')
+    expect(frenchLineMaxWords('one two three four five six seven eight nine ten eleven twelve')).toBe(15)
+  })
+  it('tells the adapter to keep the connecting words so the French flows', () => {
+    expect(composeFrenchAdaptSystemPrompt(BRAND_PROFILE)).toMatch(/connecting words/)
+  })
+})

@@ -6,7 +6,7 @@ import type { BrandProfile } from '../../prompts/types'
 
 const MAX_ADAPT_ATTEMPTS = 3
 /** French runs longer than English: allow a little room per line, tight enough to fit the same time window. */
-const FRENCH_LENGTH_FACTOR = 1.25
+const FRENCH_LENGTH_FACTOR = 1.15
 
 export function wordCountOf(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
@@ -26,6 +26,7 @@ export function composeFrenchAdaptSystemPrompt(brand: BrandProfile): string {
     `Mention the brand name ${brand.name} exactly as written, only where the English does.`,
     `One French line per English line, in the same order. Each French line has at most the word limit given for it (French runs longer than English, so be concise): the voice has the same time window as the English line.`,
     'Plain, easy-to-say sentences. No invented facts or figures.',
+    'The English lines flow into each other as one piece. Keep the same connecting words and images (then, once, so, while, puis, ensuite, quand) so the French reads as one continuous voiceover, not separate captions.',
     '',
     'Reply with strictly valid JSON only: { "lines": ["<French line 1>", "<French line 2>", ...] } with exactly as many lines as the English.',
   ].join('\n')
