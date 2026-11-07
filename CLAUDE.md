@@ -162,6 +162,16 @@ single-process safety the old worker's tick loop relied on. See
 There is no standalone worker process anymore — `npm run dev` at the repo
 root is the only thing to start.
 
+## 🎬 VIDEO: SINGLE-SHOT IS THE DEFAULT
+
+`POST /api/jobs/[jobId]/video/generate` starts the **single-shot** flow
+(`src/inngest/functions/singleShot.ts`, one 30s Seedance 2.5 clip): enhance the
+idea → draft (`draft_ready`) → approve → render, plus a French voice track for
+BOTH jobs. `ENABLE_SINGLE_SHOT=false` falls back to the older scene-by-scene
+pipeline (`video.ts`, still in the codebase; its form controls for duration and
+voice were removed from `/dashboard/new`). Failed draft stage: `/video/generate`
+restarts it (job page shows Retry); failed after approval: `/video/resume`.
+
 ## 🎨 CREATIVE TWIST (image_post + blog images)
 
 `src/server/pipeline/steps/shared/creativeTwist.ts` (step `creative_twist`, fails
