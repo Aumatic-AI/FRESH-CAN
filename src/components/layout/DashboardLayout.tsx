@@ -67,7 +67,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             .eq('id', row.job_id)
             .single()
 
-          const duration = (row.output_data as Record<string, unknown> | null)?.duration_sec
+          const outputData = row.output_data as Record<string, unknown> | null
+          const duration = outputData?.duration_sec ?? outputData?.duration_seconds
           const subtitle = job
             ? `${job.category} | ${job.language}${duration ? ` | ${duration}s` : ''}`
             : 'Video generated successfully'

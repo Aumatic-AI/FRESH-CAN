@@ -2933,7 +2933,7 @@ export default function JobDetailPage() {
               {activeTab === 'video' && videoStatus && (() => {
                 const d = videoStatus.draft?.draft_data
                 return d?.duration_seconds
-                  ? `${videoStatus.scenes.length} scenes · ${d.duration_seconds}s`
+                  ? `${d.single_shot ? 'Single shot' : `${videoStatus.scenes.length} scenes`} · ${d.duration_seconds}s`
                   : 'Script ready for approval'
               })()}
               {activeTab === 'image_post' && 'Image brief ready for approval'}

@@ -162,7 +162,8 @@ function MiniVideoCard({ variants }: { variants: Partial<Record<'EN' | 'FR', Vid
   const item = variants[selected] ?? variants[available[0]]
   if (!item) return null
 
-  const rawDuration = item.output_data?.duration_sec
+  // duration_sec (scene pipeline and new single-shot rows) or duration_seconds (older single-shot rows).
+  const rawDuration = item.output_data?.duration_sec ?? item.output_data?.duration_seconds
   const duration = rawDuration ? Math.round(rawDuration * 10) / 10 : rawDuration
   const filename = `${item.topic.slice(0, 40).replace(/\s+/g, '-').toLowerCase()}-${item.language}.mp4`
 
