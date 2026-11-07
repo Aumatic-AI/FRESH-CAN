@@ -1061,8 +1061,12 @@ function VideoTabContent({
           <div className="flex flex-wrap items-center gap-3">
             <Chip label="Duration" value={draftData.duration_seconds ? `${draftData.duration_seconds}s` : '—'} />
             <div className="h-4 w-px bg-gray-300" />
-            <Chip label="Scenes"   value={draftData.single_shot ? 'Single shot' : String(scenes.length)} />
-            <div className="h-4 w-px bg-gray-300" />
+            {!draftData.single_shot && (
+              <>
+                <Chip label="Scenes"   value={String(scenes.length)} />
+                <div className="h-4 w-px bg-gray-300" />
+              </>
+            )}
             <Chip label="Language" value={job.language} />
           </div>
           {isStoppable && (
@@ -2933,7 +2937,7 @@ export default function JobDetailPage() {
               {activeTab === 'video' && videoStatus && (() => {
                 const d = videoStatus.draft?.draft_data
                 return d?.duration_seconds
-                  ? `${d.single_shot ? 'Single shot' : `${videoStatus.scenes.length} scenes`} · ${d.duration_seconds}s`
+                  ? d.single_shot ? `${d.duration_seconds}s` : `${videoStatus.scenes.length} scenes · ${d.duration_seconds}s`
                   : 'Script ready for approval'
               })()}
               {activeTab === 'image_post' && 'Image brief ready for approval'}
