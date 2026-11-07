@@ -19,6 +19,8 @@ const good = [
 ]
 const reply = (lines: string[], over: Record<string, unknown> = {}) => ({
   kind: 'narration',
+  pace: 'brisk',
+  pace_reason: 'many steps',
   beats,
   lines: lines.map((text, i) => ({ text, beat_index: Math.min(i, beats.length - 1) })),
   ...over,
@@ -26,10 +28,56 @@ const reply = (lines: string[], over: Record<string, unknown> = {}) => ({
 const norm = (parsed: unknown, language: 'EN' | 'FR' | 'BOTH' = 'EN') => normalizeNarration(parsed, language, BRAND_PROFILE)
 
 describe('narration word ranges', () => {
-  it('EN and FR-only 70-80 words, BOTH 64-70 (the French voice runs longer in the same slots)', () => {
-    expect(narrationWordRange('EN')).toEqual({ min: 70, max: 80 })
-    expect(narrationWordRange('FR')).toEqual({ min: 70, max: 80 })
-    expect(narrationWordRange('BOTH')).toEqual({ min: 64, max: 70 })
+  it('brisk keeps the big script: EN/FR 70-80, BOTH 64-70 (the French voice runs longer in the same slots)', () => {
+    expect(narrationWordRange('EN', 'brisk')).toEqual({ min: 70, max: 80 })
+    expect(narrationWordRange('FR', 'brisk')).toEqual({ min: 70, max: 80 })
+    expect(narrationWordRange('BOTH', 'brisk')).toEqual({ min: 64, max: 70 })
+  })
+  it('the narration is never under 60 words, at any pace or language', () => {
+    for (const lang of ['EN', 'FR', 'BOTH'] as const) {
+      for (const p of ['calm', 'balanced', 'brisk'] as const) {
+        expect(narrationWordRange(lang, p).min).toBeGreaterThanOrEqual(60)
+      }
+    }
+    expect(narrationWordRange('EN', 'calm')).toEqual({ min: 60, max: 72 })
+    expect(narrationWordRange('BOTH', 'calm')).toEqual({ min: 60, max: 66 })
+  })
+  it('BOTH is never wider than EN at the same pace', () => {
+    for (const p of ['calm', 'balanced', 'brisk'] as const) {
+      expect(narrationWordRange('BOTH', p).max).toBeLessThanOrEqual(narrationWordRange('EN', p).max)
+    }
+  })
+})
+
+describe('pace: a calm idea calms the pictures, not the voice', () => {
+  const calm = [
+    'The container stays exactly where it is, quiet under the morning light.',
+    'Then a shopper walks up, and the door opens for the app code.',
+    'Once inside, she takes her time choosing what she needs.',
+    'Cameras and AI keep the tally while she browses, so nothing is rushed.',
+    'When she steps out, the linked card is charged without a word.',
+    'Afterwards the container stays quiet, ready for whoever arrives next.',
+  ]
+  const calmReply = (lines: string[], over: Record<string, unknown> = {}) => ({
+    kind: 'narration', pace: 'calm', pace_reason: 'a still, observational idea', beats: ['stands still', 'a shopper arrives', 'shops', 'tally', 'leaves and pays', 'stays'],
+    lines: lines.map((text, i) => ({ text, beat_index: Math.min(i, 5) })), ...over,
+  })
+  it('accepts a calm idea with a full 60+ word voice', () => {
+    expect(norm(calmReply(calm))).toMatchObject({ kind: 'lines', pace: 'calm' })
+  })
+  it('rejects a calm narration under 60 words (the voice is not thinned)', () => {
+    const thin = [...calm.slice(0, 3), 'Cameras and AI keep the tally while she browses.', 'When she steps out, the linked card is charged.']
+    expect(norm(calmReply(thin, { beats: ['a', 'b', 'c', 'd', 'e'] }))).toMatch(/too few spoken words for a calm narration \(\d+, need 60-72\)/)
+  })
+  it('rejects a script that is too big even for calm, so calm is not just brisk with a label', () => {
+    expect(norm(reply(good, { pace: 'calm' }))).toMatch(/too many spoken words for a calm narration/)
+  })
+  it('requires a valid pace for narration', () => {
+    expect(norm(reply(good, { pace: 'sprint' }))).toMatch(/pace must be/)
+    expect(norm(reply(good, { pace: undefined }))).toMatch(/pace must be/)
+  })
+  it('keeps the pace on a skipped dialogue idea so the video prompt can follow it', () => {
+    expect(norm({ kind: 'dialogue', pace: 'balanced', beats: [], lines: [] })).toMatchObject({ kind: 'skip', pace: 'balanced' })
   })
 })
 

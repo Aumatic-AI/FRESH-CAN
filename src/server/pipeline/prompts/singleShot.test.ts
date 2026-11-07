@@ -14,7 +14,7 @@ describe('single-shot prompt instructions', () => {
   it('names the brand, the 30s length, the hook and the JSON shape', () => {
     expect(system).toContain(BRAND_PROFILE.name)
     expect(system).toContain(`${SINGLE_SHOT_DURATION_SECONDS}-second`)
-    expect(system).toMatch(/HOOK/)
+    expect(system).toMatch(/OPENING/)
     expect(system).toMatch(/"prompt"/)
     expect(system).toContain(String(SINGLE_SHOT_PROMPT_MAX_CHARS))
   })
@@ -119,5 +119,25 @@ describe('final narration handed to the video prompt', () => {
   it('says BOTH max is 70 and EN is 80', () => {
     expect(composeSingleShotSystemPrompt(BRAND_PROFILE, 'BOTH')).toMatch(/no more than 70/)
     expect(composeSingleShotSystemPrompt(BRAND_PROFILE, 'EN')).toMatch(/no more than 80/)
+  })
+})
+
+describe('pace is decided by the idea, not hardcoded', () => {
+  const system = composeSingleShotSystemPrompt(BRAND_PROFILE, 'EN')
+  it('no longer demands a punchy hook, a "catchy" reel or equal fast beats', () => {
+    expect(system).not.toMatch(/catchy|1\. HOOK|must grab attention|button ending/)
+    expect(system).toMatch(/PACE: follow the Pace given/)
+    expect(system).toMatch(/never speed a calm idea up|Never speed a calm idea up/)
+  })
+  it('describes calm as unhurried (no time-lapse, no sweeping moves) and brisk as punchy', () => {
+    expect(system).toMatch(/- calm:.*No time-lapse/)
+    expect(system).toMatch(/- brisk:.*punchy/)
+  })
+  it('passes the decided pace to the model and lets a calm voice breathe', () => {
+    const base = { idea: 'i', topic: 't', category: 'c', targetAudience: 'a', aspectRatio: '9:16' as const, lockedNarration: ['One line here is enough.'] }
+    expect(composeSingleShotUserPrompt({ ...base, pace: 'calm' })).toMatch(/Pace: calm/)
+    expect(composeSingleShotUserPrompt({ ...base, pace: 'calm' })).toMatch(/unhurried/)
+    expect(composeSingleShotUserPrompt({ ...base, pace: 'brisk' })).toMatch(/without long silent gaps/)
+    expect(composeSingleShotUserPrompt({ ...base })).not.toMatch(/Pace:/)
   })
 })

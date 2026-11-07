@@ -151,6 +151,7 @@ export const singleShotGenerate = inngest.createFunction(
           aspectRatio: job.aspectRatio,
           language: job.language,
           lockedNarration: narration.kind === 'lines' ? narration.lines : undefined,
+          pace: narration.pace,
         },
       ),
     )

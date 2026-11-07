@@ -32,6 +32,13 @@ export const SINGLE_SHOT_PROMPT_MIN_CHARS = 200
 /** Fresh-CAN video ads use narration over natural ambient sound, never music. Appended when the model omits it. */
 export const SINGLE_SHOT_NO_MUSIC_CLAUSE = 'Audio: natural ambient sound only. No background music, no musical score, no soundtrack and no singing.'
 
+/**
+ * How fast the video moves, decided from the idea's own tone and amount of story (never hardcoded): a still,
+ * observational idea is calm; a busy multi-step journey or a punchy promo is brisk.
+ */
+export type SingleShotPace = 'calm' | 'balanced' | 'brisk'
+export const SINGLE_SHOT_PACES: readonly SingleShotPace[] = ['calm', 'balanced', 'brisk']
+
 export type SingleShotAudioMode = 'narration' | 'dialogue'
 export const SINGLE_SHOT_AUDIO_MODES: readonly SingleShotAudioMode[] = ['narration', 'dialogue']
 
@@ -95,14 +102,20 @@ export interface SingleShotPromptInput {
   language?: SingleShotJobLanguage
   /** Final narration written by the narration step: spoken verbatim, in order, as narration. */
   lockedNarration?: string[]
+  /** Decided by the narration step from the idea; absent when the prompt step should decide it itself. */
+  pace?: SingleShotPace
 }
 
 /** Tells the video-prompt step that the narration is final. Appended to its user message. */
-export function lockedNarrationDirective(lines: string[]): string {
+export function lockedNarrationDirective(lines: string[], pace?: SingleShotPace): string {
+  const flow =
+    pace === 'calm'
+      ? 'The voice is one steady, continuous piece with no long silent gaps; keep the pictures unhurried underneath it.'
+      : 'The voice is one continuous piece: plan the beats so the lines follow each other without long silent gaps.'
   return [
     'The narration is FINAL and already written. Do not change, add, drop or reorder a word:',
     ...lines.map((l, i) => `${i + 1}. "${l}"`),
-    'audio_mode must be "narration". Put each line, in this exact order and in double quotes, at the beat in the timed plan where it is heard. The voice is one continuous piece: plan the beats so the lines follow each other without long silent gaps.',
+    `audio_mode must be "narration". Put each line, in this exact order and in double quotes, at the beat in the timed plan where it is heard. ${flow}`,
     'spoken_lines must be exactly these lines. The length rule below does not apply to them.',
   ].join('\n')
 }
@@ -111,7 +124,7 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
   const banned = brand.bannedWords.length > 0 ? `\nNever use these words: ${brand.bannedWords.join(', ')}.` : ''
   const dress = brand.dressRule ? `\nPeople on screen: ${brand.dressRule}` : ''
   return [
-    `You turn a short, plain idea into ONE prompt for a text-to-video model (Seedance 2.5) that makes a catchy ${SINGLE_SHOT_DURATION_SECONDS}-second social ad reel for the brand ${brand.name}.`,
+    `You turn a short, plain idea into ONE prompt for a text-to-video model (Seedance 2.5) that makes a ${SINGLE_SHOT_DURATION_SECONDS}-second social ad reel for the brand ${brand.name}.`,
     '',
     `Brand context (facts only; mention the brand at most once, as part of the story, never as a slogan recital):\n${brand.neutralIdentityLine ?? brand.missionStatement}`,
     `Voice: ${brand.voiceGuidelines}${banned}${dress}`,
@@ -138,9 +151,15 @@ export function composeSingleShotSystemPrompt(brand: BrandProfile, language: Sin
     '- "dialogue": one or two VISIBLE people talk, lip-synced. Choose it when the idea involves a conversation, a testimonial, someone talking to camera, a reaction line, a question and answer, or creator copy in quotation marks or first person ("I", "we") said by a person.',
     'Pick exactly one; never mix them. If the idea could go either way, choose "narration".',
     '',
+    'PACE: follow the Pace given in the user message; if none is given, choose it from the idea. Pace comes from the idea\'s own tone and how much story it holds, never from habit:',
+    '- calm: unhurried and observational (a still place, a slow day, a gentle or reflective idea). Fewer events in the PICTURES: let each beat breathe for 6-10 seconds with held shots and one slow, steady camera move. The voice stays full and continuous underneath; only the pictures are calm. No time-lapse, no accelerating light, no sweeping or whipping moves, and at most one or two people moving at a time.',
+    '- balanced: relaxed storytelling with a clear rhythm, beats of about 5-8 seconds, smooth camera moves.',
+    '- brisk: lively and punchy (a busy journey with many steps, an energetic promo). Beats of 3-5 seconds, an attention-grabbing first 2 seconds, energetic movement.',
+    'The idea decides what is shown; the pace decides how quickly. Never speed a calm idea up, and never pad a brisk one.',
+    '',
     'STEP 2: WRITE THE PROMPT as flowing direction a film crew could follow:',
-    '1. HOOK: the first 2 seconds must grab attention (a surprising image, a question, a striking motion).',
-    `2. TIMED BEATS across the ${SINGLE_SHOT_DURATION_SECONDS} seconds, e.g. "0-3s ... 3-10s ...", one clear visual idea per beat (while the voice tells one continuous story across the beats), building to a payoff and a button ending in the last 3 seconds.`,
+    '1. OPENING: the first 2 seconds must earn attention in the way the pace allows (calm: a quiet, striking image; balanced: an intriguing image or small motion; brisk: surprising motion or a question).',
+    `2. TIMED BEATS across the ${SINGLE_SHOT_DURATION_SECONDS} seconds, e.g. "0-3s ... 3-10s ...", one clear visual idea per beat (while the voice tells one continuous story across the beats), building to a payoff and a closing image in the last 3 seconds. Beat lengths follow the pace and need not be equal.`,
     '3. ONE look: light, colour grade, lens feel and setting stated once and kept consistent. Concrete camera plan (shot size, angle, slow push/pan/drift) that evolves smoothly with no hard cuts.',
     '4. SOUND: natural ambient sound only (room tone, footsteps, the door, outdoor air). NO background music, no musical score, no soundtrack and no singing, ever. Say so once in the prompt ("No background music"). The only other audio is the speech written as below.',
     '5. Concrete nouns, no vague mood words, no brand-new product claims, no invented statistics.',
@@ -184,7 +203,8 @@ export function composeSingleShotUserPrompt(input: SingleShotPromptInput): strin
     `Aspect ratio: ${input.aspectRatio}; compose for exactly this frame.`,
     `Length: ${SINGLE_SHOT_DURATION_SECONDS} seconds, one continuous shot.`,
   ]
-  if (input.lockedNarration?.length) lines.push(lockedNarrationDirective(input.lockedNarration))
+  if (input.pace) lines.push(`Pace: ${input.pace} (decided from the idea; follow it).`)
+  if (input.lockedNarration?.length) lines.push(lockedNarrationDirective(input.lockedNarration, input.pace))
   if (input.previousProblem) {
     lines.push(`Your previous reply was rejected: ${input.previousProblem}. Fix exactly that and reply again.`)
   }
