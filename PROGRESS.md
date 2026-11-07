@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-11-07 — Single-shot pace is decided by the idea, not hardcoded (uncommitted)
+- Why: job 8e1ea24e ("the container stays perfectly still while the day passes") came out hurried: the prompt said "daylight continuously accelerates" and "a fast-moving band of sunlight", six equal 5s beats each with a new shopper, and 75 narration words (the 70-80 floor). Cause: hardcoded "catchy", "HOOK ... striking motion", "payoff and a button ending", and word floors that assumed a brisk promo.
+- Narration step now returns `pace` (calm | balanced | brisk) + a reason, chosen from the idea's tone and how much story it holds. Word ranges (REVISED same day: pace shapes the visuals, never thins the voice; floor 60 everywhere): EN/FR calm 60-72, balanced 64-76, brisk 70-80; BOTH calm 60-66, balanced 62-68, brisk 64-70 (French runs longer). 5-7 lines of 6-14 words at every pace.
+- Video prompt: removed the "catchy"/forced-hook wording; new PACE block (calm: unhurried, 6-10s beats, quiet stretches, no time-lapse or sweeping moves; brisk: punchy 3-5s beats). The decided pace is passed in the user message; calm only changes the pictures (the voice stays continuous underneath). Dialogue/creator-copy ideas keep the pace the model returned, or the prompt step decides it itself.
+- Not done: no real paid run to hear/see it; pace is the model's judgement, so a borderline idea can land either way.
+
 ## 2026-11-07 — Single-shot narration: connected, detailed, no longer sparse (uncommitted)
 - Why: job 6daa6b34 had 56 words of caption-like lines; a loudness check showed the voice used <=19s of 30s, so the old 70-word cap was not the limit. The French voice (BOTH) is the real limit: its last line already overflowed by 468 ms.
 - New step `write-narration` (before `enhance-prompt`): one connected passage, every beat of the idea covered, 5-7 lines of 6-14 words. Limits: EN/FR 70-80 words, BOTH 64-70 (floor enforced, retried up to 3x). Checks: bare labels, filler, music/banned words, beat coverage, adjacent same opener, and >= half the lines linking to the previous one. Dialogue and creator-written copy skip it.

@@ -177,6 +177,7 @@ prompts in `prompts/singleShotNarration.ts`): one connected passage covering eve
 beat of the idea, 70-80 words (BOTH 64-70, because French runs longer), split into
 5-7 lines of 6-14 words. It is validated (length, beat coverage, flow) and handed to
 the video-prompt step as final copy. Dialogue ideas and creator-written copy skip it.
+Pace (calm | balanced | brisk) is decided from the idea by the narration step and shapes the VISUALS; the narration is never under 60 words (EN/FR calm 60-72, balanced 64-76, brisk 70-80; BOTH 60-66 / 62-68 / 64-70). Nothing about speed is hardcoded.
 French adaptation allows lines about 1.15x the English word count.
 
 ## 🎨 CREATIVE TWIST (image_post + blog images)
